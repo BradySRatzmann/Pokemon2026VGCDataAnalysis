@@ -731,11 +731,7 @@ def run_archetype_clustering(
 # -----------------------------------------------------------------------------
 
 def build_sixth_mon_dataset(team_df: pd.DataFrame):
-    """
-    Returns:
-      X_tokens: list[list[str]] where each inner list is the 5 known mons
-      y: list[str] the held-out mon to predict
-    """
+
     cols = [f"pokemon_{i}" for i in range(1, 7)]
     X_tokens: list[list[str]] = []
     y: list[str] = []
