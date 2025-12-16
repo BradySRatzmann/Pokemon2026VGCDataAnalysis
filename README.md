@@ -30,7 +30,7 @@ Requirments:
     pandas numpy matplotlib requests beautifulsoup4 sklearn collections
 
 To Run:
-    python main.py (to switch currently used dataset change line 599 from "data_points = read_data("data.txt")" ---> "data_points = read_data("filename.txt")" it is configured for data.txt by default)
+    python main.py (to switch currently used dataset change line 883 from "data_points = read_data("data.txt")" ---> "data_points = read_data("filename.txt")" it is configured for data.txt by default)
 
 input/output
     Input:
