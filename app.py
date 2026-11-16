@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import pickle
 import shutil
+import re
 
 from main import (
     run_analysis,
@@ -35,6 +36,34 @@ def show_pokemon_image(pokemon_name, width=100):
         st.image(get_pokemon_image(pokemon_name), width=width)
     except Exception:
         st.caption("Sprite unavailable")
+
+def get_placement_rank(placement):
+    """
+    Convert different placement formats into a number
+    so players can be sorted from best to worst.
+    """
+    placement = str(placement).strip().lower()
+
+    # Winning placements
+    if placement in ["winner", "winning"]:
+        return 1
+
+    # Runner-up placements
+    if placement in ["runner-up", "runner up", "runnerup"]:
+        return 2
+
+    # Ordinal placements: 1st, 2nd, 3rd, 4th, etc.
+    ordinal_match = re.match(r"^(\d+)(st|nd|rd|th)", placement)
+    if ordinal_match:
+        return int(ordinal_match.group(1))
+
+    # Top placements: Top 4, Top 16, Top 128, etc.
+    top_match = re.match(r"^top\s+(\d+)", placement)
+    if top_match:
+        return int(top_match.group(1))
+
+    # Unrecognized placements go to the bottom of the list
+    return 9999
 # --------------------------------------------------
 # Page Configuration
 # --------------------------------------------------
@@ -55,7 +84,7 @@ st.title("⚔️ Pokémon VGC Analyzer")
 st.write(
     "Explore competitive Pokémon teams, "
     "analyze usage statistics, and discover "
-    "team composition trends. Currently Configured to work with Pokemon Scarlet/Violet OTS poke-pastes"
+    "team composition trends. Currently configured to work with Pokémon Champions team pastes."
 )
 
 st.divider()
@@ -161,9 +190,11 @@ page = st.sidebar.radio(
     [
         "Dashboard",
         "Usage Statistics",
-        "Team Synergy",
         "Pokémon Explorer",
+        "Player Analysis",
+        "Event Analysis",
         "Team Predictor",
+        "Team Database",
         "Team Archetypes"
     ]
 )
@@ -242,18 +273,28 @@ else:
             .head(10)
         )
 
+        # Sort Pokémon alphabetically to match the chart order
+        usage_df = usage_df.sort_values(
+            by="name",
+            key=lambda col: col.str.lower()
+        ).reset_index(drop=True)
+
         st.bar_chart(
             usage_df,
             x="name",
             y="usage_rate"
         )
+        # Display Pokémon sprites aligned underneath their respective bars
+        sprite_columns = st.columns([0.72] + [1] * 10)
 
-        st.subheader("Team Data Preview")
+        for i, (_, pokemon) in enumerate(usage_df.iterrows()):
+            with sprite_columns[i + 1]:
+                st.image(
+                    get_pokemon_image(pokemon["name"]),
+                    width=50
+                )
 
-        st.dataframe(
-            team_df.head(10),
-            use_container_width=True
-        )
+
 
     # ----------------------------------------------
     # Usage Statistics
@@ -269,7 +310,7 @@ else:
 
             "Items": "item_usage",
 
-            "Tera Types": "tera_usage",
+            "Natures": "nature_usage",
 
             "Moves": "move_usage"
 
@@ -304,125 +345,6 @@ else:
         st.bar_chart(selected_data[value_column])
 
         st.dataframe(selected_data)
-
-# --------------------------------------------------
-# Team Synergy
-# --------------------------------------------------
-
-    elif page == "Team Synergy":
-
-        st.header("Team Synergy")
-
-        st.write(
-        "Explore which Pokémon commonly appear together "
-        "on competitive teams."
-     )
-
-        # Get pair usage data
-        pair_df = results["pair_df"]
-
-        if pair_df.empty:
-            st.warning("No Pokémon pair data was found.")
-
-        else:
-
-            # ------------------------------------------
-            # Most Common Pokémon Pairs
-            # ------------------------------------------
-
-            st.subheader("Most Common Pokémon Pairs")
-
-            top_pairs = pair_df.head(20).copy()
-
-            # Make Pokémon pairs easier to read
-            top_pairs.index = [
-                f"{a} + {b}"
-                for a, b in top_pairs.index
-            ]
-
-            st.bar_chart(top_pairs["teams_used"])
-
-            st.caption(
-            "   Shows how many teams used each Pokémon combination."
-         )
-
-            # Display pair data
-            st.dataframe(
-                top_pairs,
-                use_container_width=True
-            )
-
-            # ------------------------------------------
-            # Pokémon Partner Explorer
-            # ------------------------------------------
-
-            st.divider()
-
-            st.subheader("Pokémon Partner Explorer")
-
-            pokemon_options = sorted(
-                results["pokemon_df"]["name"]
-                .dropna()
-                .unique()
-            )
-
-            selected_pokemon = st.selectbox(
-                "Choose a Pokémon:",
-                pokemon_options
-            )
-            # Display selected Pokémon
-            col1, col2 = st.columns([1, 4])
-
-            with col1:
-                show_pokemon_image(selected_pokemon, width=100)
-
-            with col2:
-                st.subheader(selected_pokemon.title())
-
-            partners_df = analyze_pokemon_partners(
-                pair_df,
-                selected_pokemon,
-                top_n=10
-            )
-
-            if partners_df.empty:
-
-                st.warning(
-                    f"No partner data found for {selected_pokemon}."
-                )
-
-            else:
-
-                st.write(
-                    f"Most common partners for **{selected_pokemon.title()}**:"
-                )
-
-                # Display partner images
-                partner_columns = st.columns(5)
-
-                for i, (_, partner) in enumerate(partners_df.iterrows()):
-                    with partner_columns[i % 5]:
-                        show_pokemon_image(partner["partner"], width=80)
-
-                        st.caption(partner["partner"].title())
-
-                        st.caption(
-                            f'{int(partner["teams_used"])} teams'
-                        )
-
-                # Existing partner chart
-                st.bar_chart(
-                    partners_df.set_index("partner")["teams_used"]
-                )
-
-                # Existing partner table
-                st.dataframe(
-                    partners_df,
-                    use_container_width=True
-                )
-
-
-
 
 
     # ----------------------------------------------
@@ -470,7 +392,29 @@ else:
 
                 if selected_pokemon in pokemon_usage.index:
                     usage_row = pokemon_usage.loc[selected_pokemon]
-                    metric_col1, metric_col2 = st.columns(2)
+
+                    # Find teams featuring this Pokémon
+                    pokemon_columns = [
+                        f"pokemon_{i}" for i in range(1, 7)
+                        if f"pokemon_{i}" in team_df.columns
+                    ]
+
+                    team_mask = team_df[pokemon_columns].eq(
+                        selected_pokemon
+                    ).any(axis=1)
+
+                    pokemon_teams = team_df.loc[team_mask].copy()
+
+                    # Find the highest placement
+                    pokemon_teams["placement_rank"] = (
+                        pokemon_teams["placement"].apply(get_placement_rank)
+                    )
+
+                    best_team = pokemon_teams.sort_values(
+                        "placement_rank"
+                    ).iloc[0]
+
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
 
                     metric_col1.metric(
                         "Teams Used",
@@ -482,12 +426,23 @@ else:
                         f'{usage_row["usage_rate"]:.1f}%'
                     )
 
-                    pokemon_rank = (
-                        pokemon_usage.index.get_loc(selected_pokemon) + 1
+                    metric_col3.metric(
+                        "Best Placement",
+                        best_team["placement"]
                     )
+
+                    pokemon_rank = pokemon_usage.index.get_loc(
+                        selected_pokemon
+                    ) + 1
+
                     st.caption(
                         f"Usage ranking: #{pokemon_rank} "
                         f"out of {len(pokemon_usage)} Pokémon"
+                    )
+
+                    st.caption(
+                        f"Achieved by {best_team['player_name']} "
+                        f"at {best_team['event_name']}."
                     )
 
             st.divider()
@@ -499,7 +454,7 @@ else:
             attribute_sections = [
                 ("Most Common Items", "item"),
                 ("Most Common Abilities", "ability"),
-                ("Most Common Tera Types", "tera_type")
+                ("Most Common Natures", "nature")
             ]
 
             for column, (section_title, field) in zip(
@@ -573,15 +528,469 @@ else:
                 if matching_teams.empty:
                     st.caption("No matching team records were found.")
                 else:
+                    # Include player, placement, and event information
+                    display_columns = [
+                        column for column in [
+                            "team_id",
+                            "player_name",
+                            "placement",
+                            "event_name"
+                        ] + team_columns
+                        if column in matching_teams.columns
+                    ]
+
                     st.dataframe(
-                        matching_teams[["team_id"] + team_columns],
+                        matching_teams[display_columns],
                         use_container_width=True,
                         hide_index=True
                     )
             else:
                 st.caption("Team membership data is not available.")
 
+            # ------------------------------------------
+            # Pokémon Partner Explorer
+            # ------------------------------------------
 
+            st.divider()
+            st.subheader("Pokémon Partner Explorer")
+
+            # Use the same selected Pokémon as the rest of this page
+            pair_df = results["pair_df"]
+
+            if pair_df.empty:
+                st.warning("No Pokémon pair data was found.")
+
+            else:
+                partners_df = analyze_pokemon_partners(
+                    pair_df,
+                    selected_pokemon,
+                    top_n=10
+                )
+
+                if partners_df.empty:
+
+                    st.warning(
+                        f"No partner data found for {selected_pokemon}."
+                    )
+
+                else:
+
+                    st.write(
+                        f"Most common partners for **{selected_pokemon.title()}**:"
+                    )
+
+                    # Display partner images
+                    partner_columns = st.columns(5)
+
+                    for i, (_, partner) in enumerate(partners_df.iterrows()):
+                        with partner_columns[i % 5]:
+                            show_pokemon_image(
+                                partner["partner"],
+                                width=80
+                            )
+
+                            st.caption(partner["partner"].title())
+
+                            st.caption(
+                                f'{int(partner["teams_used"])} teams'
+                            )
+
+                    # Display partner chart
+                    st.bar_chart(
+                        partners_df.set_index("partner")["teams_used"]
+                    )
+
+                    # Display partner table
+                    st.dataframe(
+                        partners_df,
+                        use_container_width=True
+                    )
+
+
+
+    # ----------------------------------------------
+    # Player Analysis
+    # ----------------------------------------------
+
+    elif page == "Player Analysis":
+
+        st.header("Player Analysis")
+
+        st.write(
+            "Explore individual players, their teams, "
+            "most-used Pokémon, and competitive placements."
+        )
+
+        required_columns = [
+            "player_name",
+            "placement",
+            "event_name",
+            "source_url"
+        ]
+
+        if not all(column in team_df.columns for column in required_columns):
+            st.warning(
+                "Player metadata is missing. Please run a fresh analysis."
+            )
+
+        else:
+
+            player_options = sorted(
+                player for player in team_df["player_name"].dropna().unique()
+                if player != "Unknown"
+            )
+
+            if not player_options:
+                st.warning("No player information was found.")
+
+            else:
+
+                selected_player = st.selectbox(
+                    "Choose a player:",
+                    player_options,
+                    key="player_analysis_selection"
+                )
+
+                player_teams = team_df[
+                    team_df["player_name"] == selected_player
+                ].copy()
+
+                player_team_ids = player_teams["team_id"].tolist()
+
+                player_pokemon = pokemon_df[
+                    pokemon_df["team_id"].isin(player_team_ids)
+                ].copy()
+
+                # ----------------------------------
+                # Player Overview
+                # ----------------------------------
+
+                st.divider()
+                st.subheader(selected_player)
+
+                col1, col2, col3 = st.columns(3)
+
+                best_placement = player_teams.copy()
+                best_placement["placement_rank"] = (
+                    best_placement["placement"].apply(get_placement_rank)
+                )
+
+                best_placement = best_placement.sort_values("placement_rank").iloc[0]
+
+                col1.metric(
+                    "Top Placement",
+                    best_placement["placement"]
+                )
+
+                col2.metric(
+                    "Events",
+                    player_teams["event_name"].nunique()
+                )
+
+                col3.metric(
+                    "Unique Pokémon",
+                    player_pokemon["name"].nunique()
+                )
+
+                # ----------------------------------
+                # Most Used Pokémon
+                # ----------------------------------
+
+                st.divider()
+                st.subheader("Most Used Pokémon")
+
+                pokemon_usage = (
+                    player_pokemon.groupby("name")["team_id"]
+                    .nunique()
+                    .sort_values(ascending=False)
+                )
+
+                if pokemon_usage.empty:
+                    st.caption("No Pokémon usage data available.")
+
+                else:
+
+                    usage_df = pokemon_usage.head(10).rename(
+                        "Teams Used"
+                    ).to_frame()
+
+                    st.bar_chart(usage_df)
+
+                    sprite_columns = st.columns(5)
+
+                    for i, pokemon in enumerate(usage_df.index):
+                        with sprite_columns[i % 5]:
+                            show_pokemon_image(pokemon, width=75)
+                            st.caption(pokemon.title())
+
+                    st.dataframe(
+                        usage_df,
+                        use_container_width=True
+                    )
+
+                # ----------------------------------
+                # Common Placements
+                # ----------------------------------
+
+                st.divider()
+                st.subheader("Common Placements")
+
+                placement_counts = (
+                    player_teams["placement"]
+                    .fillna("Unknown")
+                    .value_counts()
+                )
+
+                if placement_counts.empty:
+                    st.caption("No placement information available.")
+
+                else:
+                    st.bar_chart(placement_counts)
+                    st.dataframe(
+                        placement_counts.rename("Events").to_frame(),
+                        use_container_width=True
+                    )
+
+                # ----------------------------------
+                # Player Teams
+                # ----------------------------------
+
+                st.divider()
+                st.subheader("Player Teams")
+
+                st.caption(
+                    f"Showing {len(player_teams)} team(s) found for "
+                    f"{selected_player}."
+                )
+
+                pokemon_columns = [
+                    f"pokemon_{i}" for i in range(1, 7)
+                    if f"pokemon_{i}" in player_teams.columns
+                ]
+
+                for _, team in player_teams.iterrows():
+
+                    with st.expander(
+                        f"{team['event_name']} - {team['placement']}"
+                    ):
+
+                        st.write(
+                            f"**Event:** {team['event_name']}"
+                        )
+
+                        st.write(
+                            f"**Placement:** {team['placement']}"
+                        )
+
+                        if pd.notna(team.get("source_url")):
+                            st.markdown(
+                                f"[Open Original Poképaste]({team['source_url']})"
+                            )
+
+                        sprite_columns = st.columns(6)
+
+                        for i, column in enumerate(pokemon_columns):
+                            pokemon = team[column]
+
+                            if pd.notna(pokemon) and str(pokemon).strip():
+                                with sprite_columns[i]:
+                                    show_pokemon_image(pokemon, width=75)
+                                    st.caption(str(pokemon).title())
+
+    # ----------------------------------------------
+    # Event Analysis
+    # ----------------------------------------------
+
+    elif page == "Event Analysis":
+
+        st.header("Event Analysis")
+
+        st.write(
+            "Explore tournament results, the top 16 players, "
+            "their teams, and the most common Pokémon."
+        )
+
+        required_columns = [
+            "player_name",
+            "placement",
+            "event_name",
+            "source_url"
+        ]
+
+        if not all(column in team_df.columns for column in required_columns):
+            st.warning(
+                "Event metadata is missing. Please run a fresh analysis."
+            )
+
+        else:
+
+            event_options = sorted(
+                event for event in team_df["event_name"].dropna().unique()
+                if event != "Unknown"
+            )
+
+            if not event_options:
+                st.warning("No event information was found.")
+
+            else:
+
+                selected_event = st.selectbox(
+                    "Choose an event:",
+                    event_options,
+                    key="event_analysis_selection"
+                )
+
+                event_teams = team_df[
+                    team_df["event_name"] == selected_event
+                ].copy()
+
+                event_team_ids = event_teams["team_id"].tolist()
+
+                event_pokemon = pokemon_df[
+                    pokemon_df["team_id"].isin(event_team_ids)
+                ].copy()
+
+                # ----------------------------------
+                # Event Overview
+                # ----------------------------------
+
+                st.divider()
+                st.subheader(selected_event)
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Total Teams",
+                    len(event_teams)
+                )
+
+                col2.metric(
+                    "Players",
+                    event_teams["player_name"].nunique()
+                )
+
+                col3.metric(
+                    "Unique Pokémon",
+                    event_pokemon["name"].nunique()
+                )
+
+                # ----------------------------------
+                # Most Common Pokémon
+                # ----------------------------------
+
+                st.divider()
+                st.subheader("Most Common Pokémon")
+
+                pokemon_usage = (
+                    event_pokemon.groupby("name")["team_id"]
+                    .nunique()
+                    .sort_values(ascending=False)
+                )
+
+                if pokemon_usage.empty:
+                    st.caption("No Pokémon usage data available.")
+
+                else:
+
+                    usage_df = pokemon_usage.head(20).rename(
+                        "Teams Used"
+                    ).to_frame()
+
+                    st.bar_chart(usage_df)
+
+                    sprite_columns = st.columns(5)
+
+                    for i, pokemon in enumerate(usage_df.index):
+                        with sprite_columns[i % 5]:
+                            show_pokemon_image(pokemon, width=75)
+                            st.caption(pokemon.title())
+
+                    st.dataframe(
+                        usage_df,
+                        use_container_width=True
+                    )
+
+
+                # ----------------------------------
+                # Top 16 Players
+                # ----------------------------------
+
+                st.divider()
+                st.subheader("Top 16 Players")
+
+                # Calculate placement rankings
+                leaderboard_df = event_teams.copy()
+
+                leaderboard_df["placement_rank"] = (
+                    leaderboard_df["placement"].apply(get_placement_rank)
+                )
+
+                # Sort players from best to worst placement
+                leaderboard_df = leaderboard_df.sort_values(
+                    ["placement_rank", "player_name"],
+                    ascending=[True, True]
+                ).head(16).reset_index(drop=True)
+
+                st.caption(
+                    "Each player appears only once, with their recorded "
+                    "placement and team."
+                )
+
+                pokemon_columns = [
+                    f"pokemon_{i}" for i in range(1, 7)
+                    if f"pokemon_{i}" in event_teams.columns
+                ]
+
+                # Display each player and their team
+                for rank, (_, player) in enumerate(
+                    leaderboard_df.iterrows(),
+                    start=1
+                ):
+
+                    with st.expander(
+                        f"#{rank} - {player['player_name']} "
+                        f"({player['placement']})"
+                    ):
+
+                        st.write(
+                            f"**Placement:** {player['placement']}"
+                        )
+
+                        if pd.notna(player.get("source_url")):
+                            st.markdown(
+                                f"[Open Original Poképaste]({player['source_url']})"
+                            )
+
+                        # Display the player's six Pokémon
+                        sprite_columns = st.columns(6)
+
+                        for i, column in enumerate(pokemon_columns):
+                            pokemon = player[column]
+
+                            if pd.notna(pokemon) and str(pokemon).strip():
+                                with sprite_columns[i]:
+                                    show_pokemon_image(
+                                        pokemon,
+                                        width=75
+                                    )
+                                    st.caption(str(pokemon).title())
+
+                # Display a compact leaderboard table
+                st.subheader("Leaderboard Data")
+
+                st.dataframe(
+                    leaderboard_df[
+                        [
+                            "player_name",
+                            "placement"
+                        ]
+                    ].rename(columns={
+                        "player_name": "Player",
+                        "placement": "Placement"
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 
     elif page == "Team Predictor":
@@ -719,6 +1128,171 @@ else:
                             hide_index=True,
                             use_container_width=True
                         )
+
+
+    # ----------------------------------------------
+    # Team Database
+    # ----------------------------------------------
+
+    elif page == "Team Database":
+
+        st.header("Team Database")
+
+        st.write(
+            "Browse the complete team dataset and filter teams "
+            "by player, placement, event, or Pokémon."
+        )
+
+        # Pokémon columns
+        pokemon_columns = [
+            f"pokemon_{i}" for i in range(1, 7)
+            if f"pokemon_{i}" in team_df.columns
+        ]
+
+        # Required metadata columns
+        metadata_columns = [
+            "player_name",
+            "placement",
+            "event_name"
+        ]
+
+        # Check whether the loaded dataset contains metadata
+        missing_columns = [
+            column for column in metadata_columns
+            if column not in team_df.columns
+        ]
+
+        if missing_columns:
+            st.warning(
+                "Player, placement, and event information is missing "
+                "from the currently loaded dataset. Please run a fresh "
+                "analysis to load the updated team metadata."
+            )
+
+        elif not pokemon_columns:
+            st.warning("No Pokémon columns were found in the team dataset.")
+
+        else:
+
+            # ------------------------------------------
+            # Filter Options
+            # ------------------------------------------
+
+            st.subheader("Filter Teams")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                selected_players = st.multiselect(
+                    "Player",
+                    sorted(team_df["player_name"].dropna().unique()),
+                    placeholder="Select players..."
+                )
+
+                selected_placements = st.multiselect(
+                    "Placement",
+                    sorted(team_df["placement"].dropna().unique()),
+                    placeholder="Select placements..."
+                )
+
+            with col2:
+                selected_events = st.multiselect(
+                    "Event",
+                    sorted(team_df["event_name"].dropna().unique()),
+                    placeholder="Select events..."
+                )
+
+                # Get every unique Pokémon across all six slots
+                all_pokemon = sorted(
+                    set(
+                        str(pokemon)
+                        for pokemon in team_df[pokemon_columns].values.flatten()
+                        if pd.notna(pokemon) and str(pokemon).strip() != ""
+                    )
+                )
+
+                selected_pokemon = st.multiselect(
+                    "Pokémon",
+                    all_pokemon,
+                    placeholder="Select Pokémon..."
+                )
+
+            st.caption(
+                "Leave a filter empty to include all values. "
+                "When multiple Pokémon are selected, teams must contain "
+                "all selected Pokémon."
+            )
+
+            # ------------------------------------------
+            # Apply Filters
+            # ------------------------------------------
+
+            # Keep only one team per player per event
+            filtered_df = team_df.drop_duplicates(
+                subset=["player_name", "event_name"],
+                keep="first"
+            ).copy()
+
+            if selected_players:
+                filtered_df = filtered_df[
+                    filtered_df["player_name"].isin(selected_players)
+                ]
+
+            if selected_placements:
+                filtered_df = filtered_df[
+                    filtered_df["placement"].isin(selected_placements)
+                ]
+
+            if selected_events:
+                filtered_df = filtered_df[
+                    filtered_df["event_name"].isin(selected_events)
+                ]
+
+            # Check all six Pokémon slots
+            if selected_pokemon:
+
+                pokemon_mask = pd.Series(
+                    True,
+                    index=filtered_df.index
+                )
+
+                for pokemon in selected_pokemon:
+
+                    pokemon_mask &= (
+                        filtered_df[pokemon_columns]
+                        .eq(pokemon)
+                        .any(axis=1)
+                    )
+
+                filtered_df = filtered_df[pokemon_mask]
+
+            # ------------------------------------------
+            # Display Results
+            # ------------------------------------------
+
+            st.divider()
+
+            st.subheader("Team Results")
+
+            col1, col2 = st.columns(2)
+
+            col1.metric(
+                "Matching Teams",
+                len(filtered_df)
+            )
+
+            col2.metric(
+                "Total Teams",
+                len(team_df)
+            )
+
+            st.dataframe(
+                filtered_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+
     # ----------------------------------------------
     # Team Archetypes
     # ----------------------------------------------

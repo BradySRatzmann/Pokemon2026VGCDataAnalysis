@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 import os
+import re
 
 import pandas as pd
 import numpy as np
@@ -27,22 +28,113 @@ def read_data(filename: str):
     with open(filename, "r", encoding="utf-8") as file:
         return [line.strip() for line in file]
 
+# Extract player, placement, and event information from a Poképaste title
+def parse_team_metadata(title: str):
+    pattern = (
+        r"^(?P<player>.+?)['’]s\s+"
+        r"(?P<placement>Runner[- ]?up|Winner|Winning|Top\s+\d+|"
+        r"\d+(?:st|nd|rd|th))\s+"
+        r"(?P<event>.+?)\s+Team List$"
+    )
 
+    match = re.match(pattern, title.strip(), re.IGNORECASE)
+
+    if not match:
+        return {
+            "player_name": "Unknown",
+            "placement": "Unknown",
+            "event_name": "Unknown"
+        }
+
+    return {
+        "player_name": match.group("player").strip(),
+        "placement": match.group("placement").strip(),
+        "event_name": re.sub(
+    r"\s+Open$",
+    "",
+    match.group("event").strip(),
+    flags=re.IGNORECASE
+)
+    }
+
+# Convert placements into numeric rankings
+def get_placement_rank(placement: str):
+    placement = str(placement).strip().lower()
+
+    if placement in ["winner", "winning"]:
+        return 1
+
+    if placement in ["runner-up", "runner up", "runnerup"]:
+        return 2
+
+    # Handle placements like Top 8, Top 64, Top 256
+    top_match = re.match(r"top\s+(\d+)", placement)
+
+    if top_match:
+        return int(top_match.group(1))
+
+    # Handle placements like 1st, 2nd, 3rd, 256th
+    ordinal_match = re.match(r"(\d+)(?:st|nd|rd|th)", placement)
+
+    if ordinal_match:
+        return int(ordinal_match.group(1))
+
+    # Unknown or unrecognized placements
+    return 9999
+
+# Asynchronous helper function to fetch a single Poképaste page
 # Asynchronous helper function to fetch a single Poképaste page
 async def fetch_page(session, url: str):
     try:
         async with session.get(url) as resp:
             if resp.status == 200:
                 html = await resp.text()
-                soup = BeautifulSoup(html, "lxml")  # Faster parser
+                soup = BeautifulSoup(html, "lxml")
+
                 paragraphs = soup.find_all("article")
-                return [para.get_text() for para in paragraphs]
+
+                # Find the page title
+                title_candidates = []
+
+                heading = soup.find("h1")
+                if heading:
+                    title_candidates.append(heading.get_text(" ", strip=True))
+
+                og_title = soup.find("meta", property="og:title")
+                if og_title and og_title.get("content"):
+                    title_candidates.append(og_title["content"])
+
+                if soup.title:
+                    title_candidates.append(soup.title.get_text(" ", strip=True))
+
+                # Extract metadata from the first matching title
+                metadata = {
+                    "player_name": "Unknown",
+                    "placement": "Unknown",
+                    "event_name": "Unknown"
+                }
+
+                for title in title_candidates:
+                    parsed = parse_team_metadata(title)
+
+                    if parsed["player_name"] != "Unknown":
+                        metadata = parsed
+                        break
+
+                return {
+                    "paragraphs": [
+                        para.get_text("\n") for para in paragraphs
+                    ],
+                    "metadata": metadata
+                }
+
             else:
                 print(f"⚠️ Failed to fetch {url} (status {resp.status})")
-                return []
+                return {"paragraphs": [], "metadata": {}}
+
     except Exception as e:
         print(f"❌ Error fetching {url}: {e}")
-        return []
+        return {"paragraphs": [], "metadata": {}}
 
 
 # Function to concurrently fetch multiple Poképaste pages
@@ -85,34 +177,98 @@ def cleaned_or_Combined(words: list[str], remove: list[str]):
     return cleaned
 
 
+
+
 # Function to tokenize a piece of text formatted for the pokepast.es website
 def tokenize(sentence: str):
-    # Detects if one optional attribute is missing and adds "none" if so
-    if "@" in sentence:
-        before_at, after_at = sentence.split("@", 1)
+    lines = [
+        line.strip()
+        for line in sentence.splitlines()
+        if line.strip()
+    ]
 
-        if after_at.strip() == "":
-            sentence = before_at + "@ none"
+    if not lines:
+        return []
 
-    sentence = sentence.lower()
-    remove_chars = [".", ",", "?", "!", "\n", ":", ";", "(", ")", "/"]
-    remove_words = ["@", "-", "ability", "tera", "type", "level", "shiny", "yes",
-                    "nature", "evs", "ivs", "hp", "atk", "def", "spa", "spd", "spe"]
+    def clean_value(value):
+        return value.strip().lower().replace(" ", "-")
 
-    # Remove unwanted punctuation
-    cleaned = "".join(char for char in sentence if char not in remove_chars)
+    # Default values
+    name = "none"
+    item = "none"
+    ability = "none"
+    nature = "none"
+    moves = []
 
-    # Split into words
-    words = cleaned.split()
+    # Read Pokémon name and held item
+    header_lines = []
+    i = 0
 
-    # Combine multiword terms
-    words = cleaned_or_Combined(words, remove_words)
+    while i < len(lines):
+        line = lines[i]
+        lower_line = line.lower()
 
-    # Normalize special cases
-    words = ["tera-blast" if w == "blast" else w for w in words]
+        if (
+            lower_line.startswith("ability:")
+            or lower_line.endswith(" nature")
+            or lower_line == "nature"
+            or lower_line.startswith("-")
+        ):
+            break
 
-    # Remove separator words
-    return word_removal(words, remove_words)
+        header_lines.append(line)
+        i += 1
+
+    # Combine header in case HTML extraction split it across lines
+    header = " ".join(header_lines)
+
+    if "@" in header:
+        name_part, item_part = header.split("@", 1)
+        name = clean_value(name_part)
+        item = clean_value(item_part)
+    else:
+        name = clean_value(header)
+
+    # Read ability, nature, and moves
+    while i < len(lines):
+        line = lines[i].strip()
+        lower_line = line.lower()
+
+        # Ability
+        if lower_line.startswith("ability:"):
+            value = line.split(":", 1)[1].strip()
+
+            if not value and i + 1 < len(lines):
+                i += 1
+                value = lines[i]
+
+            ability = clean_value(value)
+
+        # Nature
+        elif lower_line.endswith(" nature"):
+            nature = clean_value(
+                line[:-len(" nature")]
+            )
+
+        # Standalone Nature label, if HTML splits it
+        elif lower_line == "nature" and i > 0:
+            nature = clean_value(lines[i - 1])
+
+        # Moves
+        elif line == "-":
+            if i + 1 < len(lines):
+                i += 1
+                moves.append(clean_value(lines[i]))
+
+        elif line.startswith("-"):
+            moves.append(clean_value(line[1:]))
+
+        i += 1
+
+    # Keep exactly four move slots
+    moves = (moves + ["none"] * 4)[:4]
+
+    return [name, item, ability, nature] + moves
 
 
 
@@ -126,46 +282,53 @@ def data_to_row(tokens: list[str]):
         "name",
         "item",
         "ability",
-        "tera_type",
+        "nature",
         "move_1",
         "move_2",
         "move_3",
         "move_4",
     ]
 
-    # Case 1: Full 8 tokens (item present)
-    if len(tokens) == 8:
-        fixed = tokens
-
-    # Case 2: 7 tokens (item missing)
-    elif len(tokens) == 7:
-        # Insert literal "none" in item slot
-        fixed = [tokens[0], "none"] + tokens[1:]
-
-    # Case 3: Unexpected cases — pad or truncate safely
-    else:
-        fixed = (tokens + ["none"] * 8)[:8]
+    # Pad or truncate safely
+    fixed = (tokens + ["none"] * 8)[:8]
 
     return dict(zip(columns, fixed))
 
 
-# Combines the original URL with its tokenized Pokémon data
-def build_team_tokenized(data_points, paragraphs_list):
-    return [
-        (url, [tokenize(p) for p in paragraphs])
-        for url, paragraphs in zip(data_points, paragraphs_list)
-    ]
 
 
 # Build team-level DataFrame with one row per team.
 # Each team gets a unique ID, the URL, and the six Pokémon names.
+# Combines the original URL with its tokenized Pokémon data and metadata
+def build_team_tokenized(data_points, paragraphs_list):
+    teams = []
+
+    for url, page in zip(data_points, paragraphs_list):
+        pokemons = [
+            tokenize(p) for p in page["paragraphs"]
+        ]
+
+        metadata = page["metadata"]
+
+        teams.append((url, pokemons, metadata))
+
+    return teams
+
+
+# Build team-level DataFrame with one row per team.
+# Each team gets a unique ID, URL, metadata, and six Pokémon names.
 def build_team_dataframe(team_tokenized):
     rows = []
 
-    for team_id, (url, pokemons) in enumerate(team_tokenized, start=1):
+    for team_id, (url, pokemons, metadata) in enumerate(
+        team_tokenized, start=1
+    ):
         row = {
             "team_id": team_id,
             "source_url": url,
+            "player_name": metadata["player_name"],
+            "placement": metadata["placement"],
+            "event_name": metadata["event_name"],
         }
 
         for i, pkm in enumerate(pokemons, start=1):
@@ -175,7 +338,6 @@ def build_team_dataframe(team_tokenized):
         rows.append(row)
 
     return pd.DataFrame(rows)
-
 
 # Usage Rate Analysis
 # -----------------------------------------------------------------------------
@@ -209,16 +371,16 @@ def compute_usage_rates(pokemon_df):
     item_usage["usage_rate"] = item_usage["teams_used"] / total_teams * 100
     results["item_usage"] = item_usage
 
-    # --- Tera Type Usage ---
-    tera_usage = (
-        pokemon_df.groupby("tera_type")["team_id"]
+    # --- Nature Usage ---
+    nature_usage = (
+        pokemon_df.groupby("nature")["team_id"]
         .nunique()
         .sort_values(ascending=False)
         .rename("teams_used")
         .to_frame()
     )
-    tera_usage["usage_rate"] = tera_usage["teams_used"] / total_teams * 100
-    results["tera_usage"] = tera_usage
+    nature_usage["usage_rate"] = nature_usage["teams_used"] / total_teams * 100
+    results["nature_usage"] = nature_usage
 
     # --- Move Usage ---
     move_cols = ["move_1", "move_2", "move_3", "move_4"]
@@ -269,17 +431,17 @@ def plot_usage_tables(usage_results: dict, output_folder: str, top_n: int = 20):
         plt.savefig(os.path.join(output_folder, "item_usage_top.png"))
         plt.close()
 
-    # --- Tera type usage ---
-    if "tera_usage" in usage_results:
-        df = usage_results["tera_usage"].head(top_n)
+    # --- Nature usage ---
+    if "nature_usage" in usage_results:
+        df = usage_results["nature_usage"].head(top_n)
         plt.figure()
         df["usage_rate"].plot(kind="bar")
-        plt.title(f"Top {top_n} Tera Type Usage Rate")
+        plt.title(f"Top {top_n} Nature Usage Rate")
         plt.ylabel("Usage Rate (%)")
-        plt.xlabel("Tera Type")
+        plt.xlabel("Nature")
         plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "tera_usage_top.png"))
+        plt.savefig(os.path.join(output_folder, "nature_usage_top.png"))
         plt.close()
 
     # --- Move usage ---
@@ -603,17 +765,17 @@ def analyze_pokemon_attributes(
     plt.savefig(os.path.join(plots_folder, f"{safe_name}_items.png"))
     plt.close()
 
-    # --- Tera Type ---
-    tera_counts = sub["tera_type"].value_counts().head(top_n)
-    tera_counts.to_csv(os.path.join(csv_folder, f"{safe_name}_tera_types.csv"))
+    # --- Nature ---
+    nature_counts = sub["nature"].value_counts().head(top_n)
+    nature_counts.to_csv(os.path.join(csv_folder, f"{safe_name}_natures.csv"))
 
     plt.figure()
-    tera_counts.plot(kind="bar")
-    plt.title(f"Top Tera Types for {target}")
+    nature_counts.plot(kind="bar")
+    plt.title(f"Top Natures for {target}")
     plt.ylabel("Usage Count")
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_folder, f"{safe_name}_tera_types.png"))
+    plt.savefig(os.path.join(plots_folder, f"{safe_name}_natures.png"))
     plt.close()
 
     # --- Moves ---
@@ -897,11 +1059,24 @@ def run_analysis(data_points=None):
     paragraphs_list = asyncio.run(read_all_urls(data_points))
 
     # Build grouped team data mapping URLs → their Pokémon lists
+    # Build grouped team data mapping URLs → their Pokémon lists
     team_tokenized = build_team_tokenized(data_points, paragraphs_list)
+
+    # Keep only teams that placed Top 256 or better
+    team_tokenized = [
+        (url, pokemons, metadata)
+        for url, pokemons, metadata in team_tokenized
+        if get_placement_rank(metadata["placement"]) <= 256
+    ]
+
+    print(
+        f"✅ Keeping {len(team_tokenized)} teams "
+        f"that placed Top 256 or better."
+    )
 
     # Build Pokémon-level DataFrame
     pokemon_rows = []
-    for team_id, (url, pokemons) in enumerate(team_tokenized, start=1):
+    for team_id, (url, pokemons, metadata) in enumerate(team_tokenized, start=1):
         for tokens in pokemons:
             # Skip completely empty slots (no Pokémon parsed)
             if not tokens:
@@ -913,13 +1088,13 @@ def run_analysis(data_points=None):
             pokemon_rows.append(row)
 
     pokemon_df = pd.DataFrame(pokemon_rows)
-    print("\n--- Pokémon DataFrame Preview ---")
-    print(pokemon_df.head())
+    # print("\n--- Pokémon DataFrame Preview ---")
+    # print(pokemon_df.head())
 
     # Build team-level DataFrame
     team_df = build_team_dataframe(team_tokenized)
-    print("\n--- Team DataFrame Preview ---")
-    print(team_df.head())
+    # print("\n--- Team DataFrame Preview ---")
+    # print(team_df.head())
 
     # === Save Pokémon + Team DataFrames into organized folders ===
     output_root = "outputs"
@@ -932,17 +1107,17 @@ def run_analysis(data_points=None):
     # === Usage Rate Analysis ===
     usage_results = compute_usage_rates(pokemon_df)
 
-    print("\n--- Top Pokémon Usage ---")
-    print(usage_results["pokemon_usage"].head(10))
-
-    print("\n--- Top Item Usage ---")
-    print(usage_results["item_usage"].head(10))
-
-    print("\n--- Top Tera-Type Usage ---")
-    print(usage_results["tera_usage"].head(10))
-
-    print("\n--- Top Moves ---")
-    print(usage_results["move_usage"].head(10))
+    # print("\n--- Top Pokémon Usage ---")
+    # print(usage_results["pokemon_usage"].head(10))
+    #
+    # print("\n--- Top Item Usage ---")
+    # print(usage_results["item_usage"].head(10))
+    #
+    # print("\n--- Top Nature Usage ---")
+    # print(usage_results["nature_usage"].head(10))
+    #
+    # print("\n--- Top Moves ---")
+    # print(usage_results["move_usage"].head(10))
 
     # === Save usage output into organized folders inside outputs/ ===
     output_root = "outputs"
@@ -1020,7 +1195,7 @@ def run_analysis(data_points=None):
         f"✅ Archetype clustering completed: "
         f"best_k={best_k}, silhouette={best_score:.3f}"
     )
-    # === Return results to the Streamlit UI ===
+    # # === Return results to the Streamlit UI ===
     return {
         "pokemon_df": pokemon_df,
         "team_df": team_df,
@@ -1031,6 +1206,7 @@ def run_analysis(data_points=None):
         "best_k": best_k,
         "best_score": best_score
     }
+
 
 if __name__ == "__main__":
     run_analysis()
