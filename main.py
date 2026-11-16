@@ -1088,13 +1088,13 @@ def run_analysis(data_points=None):
             pokemon_rows.append(row)
 
     pokemon_df = pd.DataFrame(pokemon_rows)
-    print("\n--- Pokémon DataFrame Preview ---")
-    print(pokemon_df.head())
+    # print("\n--- Pokémon DataFrame Preview ---")
+    # print(pokemon_df.head())
 
     # Build team-level DataFrame
     team_df = build_team_dataframe(team_tokenized)
-    print("\n--- Team DataFrame Preview ---")
-    print(team_df.head())
+    # print("\n--- Team DataFrame Preview ---")
+    # print(team_df.head())
 
     # === Save Pokémon + Team DataFrames into organized folders ===
     output_root = "outputs"
@@ -1107,17 +1107,17 @@ def run_analysis(data_points=None):
     # === Usage Rate Analysis ===
     usage_results = compute_usage_rates(pokemon_df)
 
-    print("\n--- Top Pokémon Usage ---")
-    print(usage_results["pokemon_usage"].head(10))
-
-    print("\n--- Top Item Usage ---")
-    print(usage_results["item_usage"].head(10))
-
-    print("\n--- Top Nature Usage ---")
-    print(usage_results["nature_usage"].head(10))
-
-    print("\n--- Top Moves ---")
-    print(usage_results["move_usage"].head(10))
+    # print("\n--- Top Pokémon Usage ---")
+    # print(usage_results["pokemon_usage"].head(10))
+    #
+    # print("\n--- Top Item Usage ---")
+    # print(usage_results["item_usage"].head(10))
+    #
+    # print("\n--- Top Nature Usage ---")
+    # print(usage_results["nature_usage"].head(10))
+    #
+    # print("\n--- Top Moves ---")
+    # print(usage_results["move_usage"].head(10))
 
     # === Save usage output into organized folders inside outputs/ ===
     output_root = "outputs"
