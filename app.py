@@ -190,7 +190,6 @@ page = st.sidebar.radio(
     [
         "Dashboard",
         "Usage Statistics",
-        "Team Synergy",
         "Pokémon Explorer",
         "Player Analysis",
         "Event Analysis",
@@ -347,125 +346,6 @@ else:
 
         st.dataframe(selected_data)
 
-# --------------------------------------------------
-# Team Synergy
-# --------------------------------------------------
-
-    elif page == "Team Synergy":
-
-        st.header("Team Synergy")
-
-        st.write(
-        "Explore which Pokémon commonly appear together "
-        "on competitive teams."
-     )
-
-        # Get pair usage data
-        pair_df = results["pair_df"]
-
-        if pair_df.empty:
-            st.warning("No Pokémon pair data was found.")
-
-        else:
-
-            # ------------------------------------------
-            # Most Common Pokémon Pairs
-            # ------------------------------------------
-
-            st.subheader("Most Common Pokémon Pairs")
-
-            top_pairs = pair_df.head(20).copy()
-
-            # Make Pokémon pairs easier to read
-            top_pairs.index = [
-                f"{a} + {b}"
-                for a, b in top_pairs.index
-            ]
-
-            st.bar_chart(top_pairs["teams_used"])
-
-            st.caption(
-            "   Shows how many teams used each Pokémon combination."
-         )
-
-            # Display pair data
-            st.dataframe(
-                top_pairs,
-                use_container_width=True
-            )
-
-            # ------------------------------------------
-            # Pokémon Partner Explorer
-            # ------------------------------------------
-
-            st.divider()
-
-            st.subheader("Pokémon Partner Explorer")
-
-            pokemon_options = sorted(
-                results["pokemon_df"]["name"]
-                .dropna()
-                .unique()
-            )
-
-            selected_pokemon = st.selectbox(
-                "Choose a Pokémon:",
-                pokemon_options
-            )
-            # Display selected Pokémon
-            col1, col2 = st.columns([1, 4])
-
-            with col1:
-                show_pokemon_image(selected_pokemon, width=100)
-
-            with col2:
-                st.subheader(selected_pokemon.title())
-
-            partners_df = analyze_pokemon_partners(
-                pair_df,
-                selected_pokemon,
-                top_n=10
-            )
-
-            if partners_df.empty:
-
-                st.warning(
-                    f"No partner data found for {selected_pokemon}."
-                )
-
-            else:
-
-                st.write(
-                    f"Most common partners for **{selected_pokemon.title()}**:"
-                )
-
-                # Display partner images
-                partner_columns = st.columns(5)
-
-                for i, (_, partner) in enumerate(partners_df.iterrows()):
-                    with partner_columns[i % 5]:
-                        show_pokemon_image(partner["partner"], width=80)
-
-                        st.caption(partner["partner"].title())
-
-                        st.caption(
-                            f'{int(partner["teams_used"])} teams'
-                        )
-
-                # Existing partner chart
-                st.bar_chart(
-                    partners_df.set_index("partner")["teams_used"]
-                )
-
-                # Existing partner table
-                st.dataframe(
-                    partners_df,
-                    use_container_width=True
-                )
-
-
-
-
 
     # ----------------------------------------------
     # Pokémon Explorer
@@ -615,13 +495,84 @@ else:
                 if matching_teams.empty:
                     st.caption("No matching team records were found.")
                 else:
+                    # Include player, placement, and event information
+                    display_columns = [
+                        column for column in [
+                            "team_id",
+                            "player_name",
+                            "placement",
+                            "event_name"
+                        ] + team_columns
+                        if column in matching_teams.columns
+                    ]
+
                     st.dataframe(
-                        matching_teams[["team_id"] + team_columns],
+                        matching_teams[display_columns],
                         use_container_width=True,
                         hide_index=True
                     )
             else:
                 st.caption("Team membership data is not available.")
+
+            # ------------------------------------------
+            # Pokémon Partner Explorer
+            # ------------------------------------------
+
+            st.divider()
+            st.subheader("Pokémon Partner Explorer")
+
+            # Use the same selected Pokémon as the rest of this page
+            pair_df = results["pair_df"]
+
+            if pair_df.empty:
+                st.warning("No Pokémon pair data was found.")
+
+            else:
+                partners_df = analyze_pokemon_partners(
+                    pair_df,
+                    selected_pokemon,
+                    top_n=10
+                )
+
+                if partners_df.empty:
+
+                    st.warning(
+                        f"No partner data found for {selected_pokemon}."
+                    )
+
+                else:
+
+                    st.write(
+                        f"Most common partners for **{selected_pokemon.title()}**:"
+                    )
+
+                    # Display partner images
+                    partner_columns = st.columns(5)
+
+                    for i, (_, partner) in enumerate(partners_df.iterrows()):
+                        with partner_columns[i % 5]:
+                            show_pokemon_image(
+                                partner["partner"],
+                                width=80
+                            )
+
+                            st.caption(partner["partner"].title())
+
+                            st.caption(
+                                f'{int(partner["teams_used"])} teams'
+                            )
+
+                    # Display partner chart
+                    st.bar_chart(
+                        partners_df.set_index("partner")["teams_used"]
+                    )
+
+                    # Display partner table
+                    st.dataframe(
+                        partners_df,
+                        use_container_width=True
+                    )
+
 
 
     # ----------------------------------------------
