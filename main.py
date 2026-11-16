@@ -57,6 +57,31 @@ def parse_team_metadata(title: str):
 )
     }
 
+# Convert placements into numeric rankings
+def get_placement_rank(placement: str):
+    placement = str(placement).strip().lower()
+
+    if placement in ["winner", "winning"]:
+        return 1
+
+    if placement in ["runner-up", "runner up", "runnerup"]:
+        return 2
+
+    # Handle placements like Top 8, Top 64, Top 256
+    top_match = re.match(r"top\s+(\d+)", placement)
+
+    if top_match:
+        return int(top_match.group(1))
+
+    # Handle placements like 1st, 2nd, 3rd, 256th
+    ordinal_match = re.match(r"(\d+)(?:st|nd|rd|th)", placement)
+
+    if ordinal_match:
+        return int(ordinal_match.group(1))
+
+    # Unknown or unrecognized placements
+    return 9999
+
 # Asynchronous helper function to fetch a single Poképaste page
 # Asynchronous helper function to fetch a single Poképaste page
 async def fetch_page(session, url: str):
@@ -1034,7 +1059,20 @@ def run_analysis(data_points=None):
     paragraphs_list = asyncio.run(read_all_urls(data_points))
 
     # Build grouped team data mapping URLs → their Pokémon lists
+    # Build grouped team data mapping URLs → their Pokémon lists
     team_tokenized = build_team_tokenized(data_points, paragraphs_list)
+
+    # Keep only teams that placed Top 256 or better
+    team_tokenized = [
+        (url, pokemons, metadata)
+        for url, pokemons, metadata in team_tokenized
+        if get_placement_rank(metadata["placement"]) <= 256
+    ]
+
+    print(
+        f"✅ Keeping {len(team_tokenized)} teams "
+        f"that placed Top 256 or better."
+    )
 
     # Build Pokémon-level DataFrame
     pokemon_rows = []
