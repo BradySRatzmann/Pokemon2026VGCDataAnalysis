@@ -879,8 +879,9 @@ def analyze_tokens(tokenized_data: list[list[str]]):
 # -----------------------------------------------------------------------------
 
 
-def main():
-    data_points = read_data("data.txt")
+def run_analysis(data_points=None):
+    if data_points is None:
+        data_points = read_data("data.txt")
     print(f"⏳ Fetching {len(data_points)} Poképaste pages concurrently...\n")
 
     # Fetch all pages asynchronously
@@ -953,43 +954,58 @@ def main():
     # === Pair (Synergy) Analysis ===
     run_synergy_analysis(team_df, usage_results, output_root=output_root)
 
-    # === Partner Analysis for Selected Pokémon ===
-    # Example list — edit or expand as you wish
-    pokemon_to_check = ["gholdengo", "kingambit", "dragonite", "incineroar", "amoonguss","not real test"]
-
-   
-    pair_df_path = os.path.join("outputs", "synergy", "csv", "pair_usage.csv")
-    pair_df = pd.read_csv(pair_df_path, index_col=[0, 1])
-
-    # Analyze partners and attributes for each Pokémon in the list
-    for mon in pokemon_to_check:
-        analyze_pokemon_partners(pair_df, mon, output_root="outputs", top_n=10)
-
-    for mon in pokemon_to_check:
-        analyze_pokemon_attributes(pokemon_df, mon, output_root="outputs", top_n=10)
-
-    print(f"⏳ Creating cluster Summaries of common team archetypes...\n")
-    # output cvs file with plots of cluster summaries of common archetypes
-    best_k, best_score = run_archetype_clustering(
+    # # === Partner Analysis for Selected Pokémon ===
+    # # Example list — edit or expand as you wish
+    # pokemon_to_check = ["gholdengo", "kingambit", "dragonite", "incineroar", "amoonguss","not real test"]
+    #
+    #
+    # pair_df_path = os.path.join("outputs", "synergy", "csv", "pair_usage.csv")
+    # pair_df = pd.read_csv(pair_df_path, index_col=[0, 1])
+    #
+    # # Analyze partners and attributes for each Pokémon in the list
+    # for mon in pokemon_to_check:
+    #     analyze_pokemon_partners(pair_df, mon, output_root="outputs", top_n=10)
+    #
+    # for mon in pokemon_to_check:
+    #     analyze_pokemon_attributes(pokemon_df, mon, output_root="outputs", top_n=10)
+    #
+    # print(f"⏳ Creating cluster Summaries of common team archetypes...\n")
+    # # output cvs file with plots of cluster summaries of common archetypes
+    # best_k, best_score = run_archetype_clustering(
+    #     team_df,
+    #     output_root="outputs",
+    #     k_min=4,
+    #     k_max=20,
+    #     svd_components=50,
+    # )
+    # print(f"✅ archetypes clustering: best_k={best_k}, silhouette={best_score:.3f}\n")
+    #
+    # print(f"⏳ trains a model to recommend a new Pokemon given Pokemon already on the team\n")
+    # # trains a model to recommend a new mon given mons already on the team
+    # clf, mlb, metrics = train_sixth_mon_model(team_df, random_state=0)
+    # print("✅ new Pokémon model metrics:", metrics)
+    #
+    # example_team5 = ["pelipper","archaludon","basculegion","incineroar","amoonguss"]
+    # recs = recommend_sixth_mon(clf, mlb, example_team5, top_n=10)
+    # print("Top recommendations for", example_team5)
+    # for mon, p in recs:
+    #     print(f"  {mon:15s}  {p:.3f}")
+    run_synergy_analysis(
         team_df,
-        output_root="outputs",
-        k_min=4,
-        k_max=20,
-        svd_components=50,
+        usage_results,
+        output_root=output_root
     )
-    print(f"✅ archetypes clustering: best_k={best_k}, silhouette={best_score:.3f}\n")
 
-    print(f"⏳ trains a model to recommend a new Pokemon given Pokemon already on the team\n")
-    # trains a model to recommend a new mon given mons already on the team
-    clf, mlb, metrics = train_sixth_mon_model(team_df, random_state=0)
-    print("✅ new Pokémon model metrics:", metrics)
+    # === Prepare results for the UI ===
 
-    example_team5 = ["pelipper","archaludon","basculegion","incineroar","amoonguss"]
-    recs = recommend_sixth_mon(clf, mlb, example_team5, top_n=10)
-    print("Top recommendations for", example_team5)
-    for mon, p in recs:
-        print(f"  {mon:15s}  {p:.3f}")
+    pair_df = compute_pair_usage(team_df)
 
+    return {
+        "pokemon_df": pokemon_df,
+        "team_df": team_df,
+        "usage_results": usage_results,
+        "pair_df": pair_df
+    }
 
 if __name__ == "__main__":
-    main()
+    run_analysis()
