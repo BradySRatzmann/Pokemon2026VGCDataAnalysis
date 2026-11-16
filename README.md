@@ -46,8 +46,6 @@ The application currently contains the following pages:
 
 - **Usage Statistics:** Displays Pokémon usage information, including usage rates and related statistics.
 
-- **Team Synergy:** Explores Pokémon pairings and how frequently different Pokémon appear together on competitive teams.
-
 - **Pokémon Explorer:** Allows users to select an individual Pokémon and explore its usage statistics, most common items, abilities, natures, moves, and partner Pokémon. It also displays the Pokémon's highest recorded placement, the player and event associated with that placement, and the teams it appears on.
 
 - **Player Analysis:** Allows users to examine individual players, including their recorded teams, most-used Pokémon, and most common placements.
