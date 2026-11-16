@@ -34,7 +34,7 @@ def extract_pokepaste_links(urls: list[str], output_file: str):
 
 
 source_urls = [
-    #2026 Reg H data
+    #2026 Reg H data No Longer works with this format
     # "https://www.nimbasacitypost.com/2025/10/milwaukee-regional-2026.html",
     # "https://www.nimbasacitypost.com/2025/09/pittsburgh-regional-2026.html",
     # "https://www.nimbasacitypost.com/2025/09/frankfurt-regional-2026.html",
@@ -48,12 +48,15 @@ source_urls = [
     # "https://www.nimbasacitypost.com/2025/11/latin-america-international-2026.html",
     # "https://www.nimbasacitypost.com/2025/11/stuttgart-regional-2026.html"
 
-    #2027 MC Data
+    #2027 M-C Data
     "https://www.nimbasacitypost.com/2026/09/baltimore-regional-2027.html",
     "https://www.nimbasacitypost.com/2026/10/louisville-regional-2027.html",
     "https://www.nimbasacitypost.com/2026/09/frankfurt-regional-2027.html",
     "https://www.nimbasacitypost.com/2026/10/nice-regional-2027.html",
-    "https://www.nimbasacitypost.com/2026/11/gdansk-regional-2027.html"
+    "https://www.nimbasacitypost.com/2026/11/gdansk-regional-2027.html",
+    "https://www.nimbasacitypost.com/2026/10/recife-regional-2027.html",
+    "https://www.nimbasacitypost.com/2026/10/puebla-regional-2027.html",
+    "https://www.nimbasacitypost.com/2026/09/brisbane-regional-2027.html"
 ]
 
 extract_pokepaste_links(source_urls, "data.txt")
