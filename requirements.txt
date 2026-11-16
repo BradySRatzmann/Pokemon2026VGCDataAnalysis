@@ -1,0 +1,10 @@
+
+streamlit
+aiohttp
+beautifulsoup4
+lxml
+pandas
+numpy
+matplotlib
+scikit-learn
+pyinstaller
