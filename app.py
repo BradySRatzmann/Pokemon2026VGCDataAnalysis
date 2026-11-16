@@ -392,7 +392,29 @@ else:
 
                 if selected_pokemon in pokemon_usage.index:
                     usage_row = pokemon_usage.loc[selected_pokemon]
-                    metric_col1, metric_col2 = st.columns(2)
+
+                    # Find teams featuring this Pokémon
+                    pokemon_columns = [
+                        f"pokemon_{i}" for i in range(1, 7)
+                        if f"pokemon_{i}" in team_df.columns
+                    ]
+
+                    team_mask = team_df[pokemon_columns].eq(
+                        selected_pokemon
+                    ).any(axis=1)
+
+                    pokemon_teams = team_df.loc[team_mask].copy()
+
+                    # Find the highest placement
+                    pokemon_teams["placement_rank"] = (
+                        pokemon_teams["placement"].apply(get_placement_rank)
+                    )
+
+                    best_team = pokemon_teams.sort_values(
+                        "placement_rank"
+                    ).iloc[0]
+
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
 
                     metric_col1.metric(
                         "Teams Used",
@@ -404,12 +426,23 @@ else:
                         f'{usage_row["usage_rate"]:.1f}%'
                     )
 
-                    pokemon_rank = (
-                        pokemon_usage.index.get_loc(selected_pokemon) + 1
+                    metric_col3.metric(
+                        "Best Placement",
+                        best_team["placement"]
                     )
+
+                    pokemon_rank = pokemon_usage.index.get_loc(
+                        selected_pokemon
+                    ) + 1
+
                     st.caption(
                         f"Usage ranking: #{pokemon_rank} "
                         f"out of {len(pokemon_usage)} Pokémon"
+                    )
+
+                    st.caption(
+                        f"Achieved by {best_team['player_name']} "
+                        f"at {best_team['event_name']}."
                     )
 
             st.divider()
@@ -637,9 +670,16 @@ else:
 
                 col1, col2, col3 = st.columns(3)
 
+                best_placement = player_teams.copy()
+                best_placement["placement_rank"] = (
+                    best_placement["placement"].apply(get_placement_rank)
+                )
+
+                best_placement = best_placement.sort_values("placement_rank").iloc[0]
+
                 col1.metric(
-                    "Total Teams",
-                    len(player_teams)
+                    "Top Placement",
+                    best_placement["placement"]
                 )
 
                 col2.metric(
