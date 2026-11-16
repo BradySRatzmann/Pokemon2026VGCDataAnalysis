@@ -36,7 +36,7 @@ async def fetch_page(session, url: str):
                 html = await resp.text()
                 soup = BeautifulSoup(html, "lxml")  # Faster parser
                 paragraphs = soup.find_all("article")
-                return [para.get_text() for para in paragraphs]
+                return [para.get_text("\n") for para in paragraphs]
             else:
                 print(f"⚠️ Failed to fetch {url} (status {resp.status})")
                 return []
@@ -85,34 +85,76 @@ def cleaned_or_Combined(words: list[str], remove: list[str]):
     return cleaned
 
 
+
 # Function to tokenize a piece of text formatted for the pokepast.es website
 def tokenize(sentence: str):
-    # Detects if one optional attribute is missing and adds "none" if so
-    if "@" in sentence:
-        before_at, after_at = sentence.split("@", 1)
+    lines = [
+        line.strip()
+        for line in sentence.splitlines()
+        if line.strip()
+    ]
 
-        if after_at.strip() == "":
-            sentence = before_at + "@ none"
+    if not lines:
+        return []
 
-    sentence = sentence.lower()
-    remove_chars = [".", ",", "?", "!", "\n", ":", ";", "(", ")", "/"]
-    remove_words = ["@", "-", "ability", "tera", "type", "level", "shiny", "yes",
-                    "nature", "evs", "ivs", "hp", "atk", "def", "spa", "spd", "spe"]
+    def clean_value(value):
+        return value.strip().lower().replace(" ", "-")
 
-    # Remove unwanted punctuation
-    cleaned = "".join(char for char in sentence if char not in remove_chars)
+    name = "none"
+    item = "none"
+    ability = "none"
+    nature = "none"
+    moves = []
 
-    # Split into words
-    words = cleaned.split()
+    # First line contains Pokémon name and optional item
+    first_line = lines[0]
 
-    # Combine multiword terms
-    words = cleaned_or_Combined(words, remove_words)
+    if "@" in first_line:
+        name_part, item_part = first_line.split("@", 1)
+        name = clean_value(name_part)
+        item = clean_value(item_part)
+    else:
+        name = clean_value(first_line)
 
-    # Normalize special cases
-    words = ["tera-blast" if w == "blast" else w for w in words]
+    i = 1
 
-    # Remove separator words
-    return word_removal(words, remove_words)
+    while i < len(lines):
+        line = lines[i].strip()
+        lower_line = line.lower()
+
+        # Ability
+        if lower_line.startswith("ability:"):
+            value = line.split(":", 1)[1].strip()
+
+            # Ability value may be on the next line
+            if not value and i + 1 < len(lines):
+                i += 1
+                value = lines[i]
+
+            ability = clean_value(value)
+
+        # Nature
+        elif lower_line.endswith(" nature"):
+            nature = clean_value(line[:-len(" nature")])
+
+        # Moves
+        elif line.startswith("-"):
+            move = line[1:].strip()
+
+            # Move name may be on the next line
+            if not move and i + 1 < len(lines):
+                i += 1
+                move = lines[i]
+
+            if move:
+                moves.append(clean_value(move))
+
+        i += 1
+
+    # Keep exactly four move slots
+    moves = (moves + ["none"] * 4)[:4]
+
+    return [name, item, ability, nature] + moves
 
 
 
@@ -126,25 +168,15 @@ def data_to_row(tokens: list[str]):
         "name",
         "item",
         "ability",
-        "tera_type",
+        "nature",
         "move_1",
         "move_2",
         "move_3",
         "move_4",
     ]
 
-    # Case 1: Full 8 tokens (item present)
-    if len(tokens) == 8:
-        fixed = tokens
-
-    # Case 2: 7 tokens (item missing)
-    elif len(tokens) == 7:
-        # Insert literal "none" in item slot
-        fixed = [tokens[0], "none"] + tokens[1:]
-
-    # Case 3: Unexpected cases — pad or truncate safely
-    else:
-        fixed = (tokens + ["none"] * 8)[:8]
+    # Pad or truncate safely
+    fixed = (tokens + ["none"] * 8)[:8]
 
     return dict(zip(columns, fixed))
 
@@ -209,16 +241,16 @@ def compute_usage_rates(pokemon_df):
     item_usage["usage_rate"] = item_usage["teams_used"] / total_teams * 100
     results["item_usage"] = item_usage
 
-    # --- Tera Type Usage ---
-    tera_usage = (
-        pokemon_df.groupby("tera_type")["team_id"]
+    # --- Nature Usage ---
+    nature_usage = (
+        pokemon_df.groupby("nature")["team_id"]
         .nunique()
         .sort_values(ascending=False)
         .rename("teams_used")
         .to_frame()
     )
-    tera_usage["usage_rate"] = tera_usage["teams_used"] / total_teams * 100
-    results["tera_usage"] = tera_usage
+    nature_usage["usage_rate"] = nature_usage["teams_used"] / total_teams * 100
+    results["nature_usage"] = nature_usage
 
     # --- Move Usage ---
     move_cols = ["move_1", "move_2", "move_3", "move_4"]
@@ -269,17 +301,17 @@ def plot_usage_tables(usage_results: dict, output_folder: str, top_n: int = 20):
         plt.savefig(os.path.join(output_folder, "item_usage_top.png"))
         plt.close()
 
-    # --- Tera type usage ---
-    if "tera_usage" in usage_results:
-        df = usage_results["tera_usage"].head(top_n)
+    # --- Nature usage ---
+    if "nature_usage" in usage_results:
+        df = usage_results["nature_usage"].head(top_n)
         plt.figure()
         df["usage_rate"].plot(kind="bar")
-        plt.title(f"Top {top_n} Tera Type Usage Rate")
+        plt.title(f"Top {top_n} Nature Usage Rate")
         plt.ylabel("Usage Rate (%)")
-        plt.xlabel("Tera Type")
+        plt.xlabel("Nature")
         plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "tera_usage_top.png"))
+        plt.savefig(os.path.join(output_folder, "nature_usage_top.png"))
         plt.close()
 
     # --- Move usage ---
@@ -603,17 +635,17 @@ def analyze_pokemon_attributes(
     plt.savefig(os.path.join(plots_folder, f"{safe_name}_items.png"))
     plt.close()
 
-    # --- Tera Type ---
-    tera_counts = sub["tera_type"].value_counts().head(top_n)
-    tera_counts.to_csv(os.path.join(csv_folder, f"{safe_name}_tera_types.csv"))
+    # --- Nature ---
+    nature_counts = sub["nature"].value_counts().head(top_n)
+    nature_counts.to_csv(os.path.join(csv_folder, f"{safe_name}_natures.csv"))
 
     plt.figure()
-    tera_counts.plot(kind="bar")
-    plt.title(f"Top Tera Types for {target}")
+    nature_counts.plot(kind="bar")
+    plt.title(f"Top Natures for {target}")
     plt.ylabel("Usage Count")
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_folder, f"{safe_name}_tera_types.png"))
+    plt.savefig(os.path.join(plots_folder, f"{safe_name}_natures.png"))
     plt.close()
 
     # --- Moves ---
@@ -938,8 +970,8 @@ def run_analysis(data_points=None):
     print("\n--- Top Item Usage ---")
     print(usage_results["item_usage"].head(10))
 
-    print("\n--- Top Tera-Type Usage ---")
-    print(usage_results["tera_usage"].head(10))
+    print("\n--- Top Nature Usage ---")
+    print(usage_results["nature_usage"].head(10))
 
     print("\n--- Top Moves ---")
     print(usage_results["move_usage"].head(10))
@@ -1020,7 +1052,7 @@ def run_analysis(data_points=None):
         f"✅ Archetype clustering completed: "
         f"best_k={best_k}, silhouette={best_score:.3f}"
     )
-    # === Return results to the Streamlit UI ===
+    # # === Return results to the Streamlit UI ===
     return {
         "pokemon_df": pokemon_df,
         "team_df": team_df,
@@ -1031,6 +1063,7 @@ def run_analysis(data_points=None):
         "best_k": best_k,
         "best_score": best_score
     }
+
 
 if __name__ == "__main__":
     run_analysis()

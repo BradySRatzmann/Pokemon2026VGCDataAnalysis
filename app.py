@@ -55,7 +55,7 @@ st.title("⚔️ Pokémon VGC Analyzer")
 st.write(
     "Explore competitive Pokémon teams, "
     "analyze usage statistics, and discover "
-    "team composition trends. Currently Configured to work with Pokemon Scarlet/Violet OTS poke-pastes"
+    "team composition trends. Currently configured to work with Pokémon Champions team pastes."
 )
 
 st.divider()
@@ -242,11 +242,26 @@ else:
             .head(10)
         )
 
+        # Sort Pokémon alphabetically to match the chart order
+        usage_df = usage_df.sort_values(
+            by="name",
+            key=lambda col: col.str.lower()
+        ).reset_index(drop=True)
+
         st.bar_chart(
             usage_df,
             x="name",
             y="usage_rate"
         )
+        # Display Pokémon sprites aligned underneath their respective bars
+        sprite_columns = st.columns([0.72] + [1] * 10)
+
+        for i, (_, pokemon) in enumerate(usage_df.iterrows()):
+            with sprite_columns[i + 1]:
+                st.image(
+                    get_pokemon_image(pokemon["name"]),
+                    width=50
+                )
 
         st.subheader("Team Data Preview")
 
@@ -269,7 +284,7 @@ else:
 
             "Items": "item_usage",
 
-            "Tera Types": "tera_usage",
+            "Natures": "nature_usage",
 
             "Moves": "move_usage"
 
@@ -499,7 +514,7 @@ else:
             attribute_sections = [
                 ("Most Common Items", "item"),
                 ("Most Common Abilities", "ability"),
-                ("Most Common Tera Types", "tera_type")
+                ("Most Common Natures", "nature")
             ]
 
             for column, (section_title, field) in zip(
