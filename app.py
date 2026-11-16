@@ -2,11 +2,21 @@
 import streamlit as st
 import pandas as pd
 import os
+import pickle
+import shutil
 
 from main import (
     run_analysis,
     analyze_pokemon_partners
 )
+
+
+# --------------------------------------------------
+# Saved Analysis Settings
+# --------------------------------------------------
+
+OUTPUT_DIR = "outputs"
+CACHE_FILE = os.path.join(OUTPUT_DIR, "analysis_results.pkl")
 
 def get_pokemon_image(pokemon_name):
     # Convert Pokémon name into the URL format
@@ -119,19 +129,27 @@ if st.sidebar.button(
 
     if should_run:
 
-        try:
-            with st.spinner(
+        with st.spinner(
                 "Fetching and analyzing Pokémon teams..."
-            ):
+        ):
 
-                results = run_analysis(data_points)
+            # Remove previous generated analysis files
+            if os.path.exists(OUTPUT_DIR):
+                shutil.rmtree(OUTPUT_DIR)
 
-                st.session_state["results"] = results
+            # Run a fresh analysis
+            results = run_analysis(data_points)
+
+            # Save results so they can be reused next time
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+            with open(CACHE_FILE, "wb") as file:
+                pickle.dump(results, file)
+
+            st.session_state["results"] = results
 
             st.sidebar.success("Analysis completed!")
 
-        except Exception as e:
-            st.error(f"Analysis failed: {e}")
 
 
 # --------------------------------------------------
@@ -149,6 +167,26 @@ page = st.sidebar.radio(
         "Team Archetypes"
     ]
 )
+
+# --------------------------------------------------
+# Load Previously Saved Results
+# --------------------------------------------------
+
+if (
+    "results" not in st.session_state
+    and os.path.exists(CACHE_FILE)
+):
+
+    try:
+        with open(CACHE_FILE, "rb") as file:
+            st.session_state["results"] = pickle.load(file)
+
+        st.sidebar.success("Loaded previously saved analysis!")
+
+    except Exception as e:
+        st.sidebar.warning(
+            f"Could not load saved analysis: {e}"
+        )
 
 # --------------------------------------------------
 # Display Results

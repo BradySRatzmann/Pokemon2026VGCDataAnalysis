@@ -675,19 +675,43 @@ def run_archetype_clustering(
     # Normalization helps KMeans in practice
     X_red = Normalizer().fit_transform(X_red)
 
+
     # Choose K with silhouette (export all scores so you can justify in writeup)
     k_scores = []
     best = None
+
+    # Determine how many teams are available
+    n_samples = X_red.shape[0]
+
+    if n_samples < 3:
+        raise ValueError(
+            "At least 3 teams are required for archetype clustering."
+        )
+
+    # Silhouette scoring requires k to be smaller than the number of teams.
+    # If the dataset is small, lower the minimum cluster count to 2.
+    if n_samples <= k_min:
+        k_min = 2
+
+    k_max = min(k_max, n_samples - 1)
 
     for k in range(k_min, k_max + 1):
         km = KMeans(n_clusters=k, n_init=10, random_state=random_state)
         labels = km.fit_predict(X_red)
 
-        score = silhouette_score(X_red, labels) if len(set(labels)) > 1 else -1.0
+        # Silhouette requires at least 2 clusters and fewer clusters than teams.
+        n_labels = len(set(labels))
+
+        if 2 <= n_labels < n_samples:
+            score = silhouette_score(X_red, labels)
+        else:
+            score = -1.0
+
         k_scores.append((k, float(score)))
 
         if best is None or score > best[1]:
             best = (k, score, km, labels)
+
 
     best_k, best_score, km, labels = best
 
