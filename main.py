@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 import os
+import re
 
 import pandas as pd
 import numpy as np
@@ -27,22 +28,88 @@ def read_data(filename: str):
     with open(filename, "r", encoding="utf-8") as file:
         return [line.strip() for line in file]
 
+# Extract player, placement, and event information from a Poképaste title
+def parse_team_metadata(title: str):
+    pattern = (
+        r"^(?P<player>.+?)['’]s\s+"
+        r"(?P<placement>Runner[- ]?up|Winner|Winning|Top\s+\d+|"
+        r"\d+(?:st|nd|rd|th))\s+"
+        r"(?P<event>.+?)\s+Team List$"
+    )
 
+    match = re.match(pattern, title.strip(), re.IGNORECASE)
+
+    if not match:
+        return {
+            "player_name": "Unknown",
+            "placement": "Unknown",
+            "event_name": "Unknown"
+        }
+
+    return {
+        "player_name": match.group("player").strip(),
+        "placement": match.group("placement").strip(),
+        "event_name": re.sub(
+    r"\s+Open$",
+    "",
+    match.group("event").strip(),
+    flags=re.IGNORECASE
+)
+    }
+
+# Asynchronous helper function to fetch a single Poképaste page
 # Asynchronous helper function to fetch a single Poképaste page
 async def fetch_page(session, url: str):
     try:
         async with session.get(url) as resp:
             if resp.status == 200:
                 html = await resp.text()
-                soup = BeautifulSoup(html, "lxml")  # Faster parser
+                soup = BeautifulSoup(html, "lxml")
+
                 paragraphs = soup.find_all("article")
-                return [para.get_text("\n") for para in paragraphs]
+
+                # Find the page title
+                title_candidates = []
+
+                heading = soup.find("h1")
+                if heading:
+                    title_candidates.append(heading.get_text(" ", strip=True))
+
+                og_title = soup.find("meta", property="og:title")
+                if og_title and og_title.get("content"):
+                    title_candidates.append(og_title["content"])
+
+                if soup.title:
+                    title_candidates.append(soup.title.get_text(" ", strip=True))
+
+                # Extract metadata from the first matching title
+                metadata = {
+                    "player_name": "Unknown",
+                    "placement": "Unknown",
+                    "event_name": "Unknown"
+                }
+
+                for title in title_candidates:
+                    parsed = parse_team_metadata(title)
+
+                    if parsed["player_name"] != "Unknown":
+                        metadata = parsed
+                        break
+
+                return {
+                    "paragraphs": [
+                        para.get_text("\n") for para in paragraphs
+                    ],
+                    "metadata": metadata
+                }
+
             else:
                 print(f"⚠️ Failed to fetch {url} (status {resp.status})")
-                return []
+                return {"paragraphs": [], "metadata": {}}
+
     except Exception as e:
         print(f"❌ Error fetching {url}: {e}")
-        return []
+        return {"paragraphs": [], "metadata": {}}
 
 
 # Function to concurrently fetch multiple Poképaste pages
@@ -86,6 +153,7 @@ def cleaned_or_Combined(words: list[str], remove: list[str]):
 
 
 
+
 # Function to tokenize a piece of text formatted for the pokepast.es website
 def tokenize(sentence: str):
     lines = [
@@ -100,24 +168,43 @@ def tokenize(sentence: str):
     def clean_value(value):
         return value.strip().lower().replace(" ", "-")
 
+    # Default values
     name = "none"
     item = "none"
     ability = "none"
     nature = "none"
     moves = []
 
-    # First line contains Pokémon name and optional item
-    first_line = lines[0]
+    # Read Pokémon name and held item
+    header_lines = []
+    i = 0
 
-    if "@" in first_line:
-        name_part, item_part = first_line.split("@", 1)
+    while i < len(lines):
+        line = lines[i]
+        lower_line = line.lower()
+
+        if (
+            lower_line.startswith("ability:")
+            or lower_line.endswith(" nature")
+            or lower_line == "nature"
+            or lower_line.startswith("-")
+        ):
+            break
+
+        header_lines.append(line)
+        i += 1
+
+    # Combine header in case HTML extraction split it across lines
+    header = " ".join(header_lines)
+
+    if "@" in header:
+        name_part, item_part = header.split("@", 1)
         name = clean_value(name_part)
         item = clean_value(item_part)
     else:
-        name = clean_value(first_line)
+        name = clean_value(header)
 
-    i = 1
-
+    # Read ability, nature, and moves
     while i < len(lines):
         line = lines[i].strip()
         lower_line = line.lower()
@@ -126,7 +213,6 @@ def tokenize(sentence: str):
         if lower_line.startswith("ability:"):
             value = line.split(":", 1)[1].strip()
 
-            # Ability value may be on the next line
             if not value and i + 1 < len(lines):
                 i += 1
                 value = lines[i]
@@ -135,19 +221,22 @@ def tokenize(sentence: str):
 
         # Nature
         elif lower_line.endswith(" nature"):
-            nature = clean_value(line[:-len(" nature")])
+            nature = clean_value(
+                line[:-len(" nature")]
+            )
+
+        # Standalone Nature label, if HTML splits it
+        elif lower_line == "nature" and i > 0:
+            nature = clean_value(lines[i - 1])
 
         # Moves
-        elif line.startswith("-"):
-            move = line[1:].strip()
-
-            # Move name may be on the next line
-            if not move and i + 1 < len(lines):
+        elif line == "-":
+            if i + 1 < len(lines):
                 i += 1
-                move = lines[i]
+                moves.append(clean_value(lines[i]))
 
-            if move:
-                moves.append(clean_value(move))
+        elif line.startswith("-"):
+            moves.append(clean_value(line[1:]))
 
         i += 1
 
@@ -181,23 +270,40 @@ def data_to_row(tokens: list[str]):
     return dict(zip(columns, fixed))
 
 
-# Combines the original URL with its tokenized Pokémon data
-def build_team_tokenized(data_points, paragraphs_list):
-    return [
-        (url, [tokenize(p) for p in paragraphs])
-        for url, paragraphs in zip(data_points, paragraphs_list)
-    ]
 
 
 # Build team-level DataFrame with one row per team.
 # Each team gets a unique ID, the URL, and the six Pokémon names.
+# Combines the original URL with its tokenized Pokémon data and metadata
+def build_team_tokenized(data_points, paragraphs_list):
+    teams = []
+
+    for url, page in zip(data_points, paragraphs_list):
+        pokemons = [
+            tokenize(p) for p in page["paragraphs"]
+        ]
+
+        metadata = page["metadata"]
+
+        teams.append((url, pokemons, metadata))
+
+    return teams
+
+
+# Build team-level DataFrame with one row per team.
+# Each team gets a unique ID, URL, metadata, and six Pokémon names.
 def build_team_dataframe(team_tokenized):
     rows = []
 
-    for team_id, (url, pokemons) in enumerate(team_tokenized, start=1):
+    for team_id, (url, pokemons, metadata) in enumerate(
+        team_tokenized, start=1
+    ):
         row = {
             "team_id": team_id,
             "source_url": url,
+            "player_name": metadata["player_name"],
+            "placement": metadata["placement"],
+            "event_name": metadata["event_name"],
         }
 
         for i, pkm in enumerate(pokemons, start=1):
@@ -207,7 +313,6 @@ def build_team_dataframe(team_tokenized):
         rows.append(row)
 
     return pd.DataFrame(rows)
-
 
 # Usage Rate Analysis
 # -----------------------------------------------------------------------------
@@ -933,7 +1038,7 @@ def run_analysis(data_points=None):
 
     # Build Pokémon-level DataFrame
     pokemon_rows = []
-    for team_id, (url, pokemons) in enumerate(team_tokenized, start=1):
+    for team_id, (url, pokemons, metadata) in enumerate(team_tokenized, start=1):
         for tokens in pokemons:
             # Skip completely empty slots (no Pokémon parsed)
             if not tokens:
