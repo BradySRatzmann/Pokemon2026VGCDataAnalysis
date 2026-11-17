@@ -6,6 +6,8 @@ import os
 import pickle
 import shutil
 import re
+import html
+import requests
 
 from main import (
     run_analysis,
@@ -37,6 +39,7 @@ def fix_pokemon_names(pokemon):
 
     return pokemon
 
+@st.cache_data
 def get_pokemon_image(pokemon_name):
     # Convert Pokémon name into the URL format
     pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
@@ -46,13 +49,15 @@ def get_pokemon_image(pokemon_name):
         f"https://play.pokemonshowdown.com/sprites/ani/"
         f"{pokemon_name}.gif"
     )
+@st.cache_data
 def get_pokemon_image_backup(pokemon_name):
     # Convert Pokémon name into the URL format
     pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
     pokemon_name = pokemon_name.replace("’", "'").replace("'", "")
+    pokemon_name = fix_pokemon_names(pokemon_name)
 
     return (
-        f"https://www.smogon.com/forums/media/minisprites/"
+        f'https://play.pokemonshowdown.com/sprites/gen5/'
         f"{pokemon_name}.png"
     )
 
@@ -109,6 +114,83 @@ def show_pokemon_image(pokemon_name, width=100):
         html,
         width=width,
         height=height,
+        scrolling=False
+    )
+
+
+@st.cache_data
+def get_item_image(item_name):
+    # Convert item name into the Pokémon Showdown URL format
+    item_name = str(item_name).strip().lower()
+    item_name = item_name.replace(" ","-")
+
+    image_url = (
+        f"https://play.pokemonshowdown.com/sprites/itemicons/"
+        f"{item_name}.png"
+    )
+
+    backup_url = (
+        "https://play.pokemonshowdown.com/sprites/itemicons/0.png"
+    )
+
+    mega_stones = ["ite","ite-x","ite-y","ite-z"]
+
+    for suffix in mega_stones:
+        if item_name.endswith(suffix):
+            image_url = "https://play.pokemonshowdown.com/sprites/misc/mega.png"
+
+    # Check whether the item image exists
+    try:
+        response = requests.get(image_url, timeout=5)
+        response.raise_for_status()
+        return image_url
+
+    except requests.RequestException:
+        return backup_url
+
+
+def show_item_image(item_name, width=40):
+    image_url = get_item_image(item_name)
+    backup_url = "https://play.pokemonshowdown.com/sprites/itemicons/0.png"
+
+    html = f"""
+    <div style="
+        width: {width}px;
+        height: {width}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 3px;
+    ">
+        <img id="item-sprite"
+             src={json.dumps(image_url)}
+             style="
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                object-position: center;
+                display: block;
+             ">
+    </div>
+
+    <script>
+        const img = document.getElementById("item-sprite");
+        const backup = {json.dumps(backup_url)};
+
+        img.addEventListener("error", function() {{
+            if (!img.dataset.fallback) {{
+                img.dataset.fallback = "true";
+                img.src = backup;
+            }}
+        }});
+    </script>
+    """
+
+    components.html(
+        html,
+        width=width,
+        height=width,
         scrolling=False
     )
 
@@ -546,10 +628,35 @@ else:
                     if counts.empty:
                         st.caption("No data available.")
                     else:
-                        st.dataframe(
-                            counts.rename("Uses").to_frame(),
-                            use_container_width=True
-                        )
+                        if field == "item":
+                            item_display = counts.rename("Uses").reset_index()
+                            item_display.columns = ["Item", "Uses"]
+
+                            # Generate item image URLs, including fallback images
+                            item_display["Image"] = item_display["Item"].apply(
+                                get_item_image
+                            )
+
+                            # Put the image column first
+                            item_display = item_display[["Image", "Item", "Uses"]]
+
+                            st.dataframe(
+                                item_display,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Image": st.column_config.ImageColumn(
+                                        "Image",
+                                        width="small"
+                                    )
+                                }
+                            )
+
+                        else:
+                            st.dataframe(
+                                counts.rename("Uses").to_frame(),
+                                use_container_width=True
+                            )
 
             st.subheader("Most Common Moves")
 
