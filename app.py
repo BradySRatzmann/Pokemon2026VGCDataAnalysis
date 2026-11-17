@@ -1,4 +1,5 @@
-
+import streamlit.components.v1 as components
+import json
 import streamlit as st
 import pandas as pd
 import os
@@ -19,7 +20,33 @@ from main import (
 OUTPUT_DIR = "outputs"
 CACHE_FILE = os.path.join(OUTPUT_DIR, "analysis_results.pkl")
 
+def fix_pokemon_names(pokemon):
+
+
+    replacements = {
+        "mega-x": "megax",
+        "mega-y": "megay",
+        "mega-z": "megaz",
+        "-o" : "o"
+    }
+
+    for suffix, replacement in replacements.items():
+        if pokemon.endswith(suffix):
+            pokemon = pokemon[:-len(suffix)] + replacement
+            break
+
+    return pokemon
+
 def get_pokemon_image(pokemon_name):
+    # Convert Pokémon name into the URL format
+    pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
+    pokemon_name = pokemon_name.replace("’", "'").replace("'", "")
+    pokemon_name = fix_pokemon_names(pokemon_name)
+    return (
+        f"https://play.pokemonshowdown.com/sprites/ani/"
+        f"{pokemon_name}.gif"
+    )
+def get_pokemon_image_backup(pokemon_name):
     # Convert Pokémon name into the URL format
     pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
     pokemon_name = pokemon_name.replace("’", "'").replace("'", "")
@@ -29,13 +56,61 @@ def get_pokemon_image(pokemon_name):
         f"{pokemon_name}.png"
     )
 
-
 def show_pokemon_image(pokemon_name, width=100):
-    # Keep the page usable if a sprite URL is unavailable.
-    try:
-        st.image(get_pokemon_image(pokemon_name), width=width)
-    except Exception:
-        st.caption("Sprite unavailable")
+    height = width
+
+    primary_url = get_pokemon_image(pokemon_name)
+    backup_url = get_pokemon_image_backup(pokemon_name)
+
+    html = f"""
+    <div style="
+        width: {width}px;
+        height: {height}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 5px;
+        overflow: visible;
+    ">
+        <img id="pokemon-sprite"
+             src={json.dumps(primary_url)}
+             style="
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                object-position: center;
+                display: block;
+             ">
+
+        <span id="fallback-text"
+              style="display:none; color:gray;">
+            Sprite unavailable
+        </span>
+    </div>
+
+    <script>
+        const img = document.getElementById("pokemon-sprite");
+        const backup = {json.dumps(backup_url)};
+
+        img.addEventListener("error", function() {{
+            if (!img.dataset.fallback) {{
+                img.dataset.fallback = "true";
+                img.src = backup;
+            }} else {{
+                img.style.display = "none";
+                document.getElementById("fallback-text").style.display = "block";
+            }}
+        }});
+    </script>
+    """
+
+    components.html(
+        html,
+        width=width,
+        height=height,
+        scrolling=False
+    )
 
 def get_placement_rank(placement):
     """
@@ -289,10 +364,7 @@ else:
 
         for i, (_, pokemon) in enumerate(usage_df.iterrows()):
             with sprite_columns[i + 1]:
-                st.image(
-                    get_pokemon_image(pokemon["name"]),
-                    width=50
-                )
+                show_pokemon_image(pokemon['name'])
 
 
 
@@ -381,7 +453,7 @@ else:
             image_col, info_col = st.columns([1, 4])
 
             with image_col:
-                show_pokemon_image(selected_pokemon, width=120)
+                show_pokemon_image(selected_pokemon, width=200)
 
             pokemon_usage = usage_results.get(
                 "pokemon_usage", pd.DataFrame()
@@ -531,7 +603,6 @@ else:
                     # Include player, placement, and event information
                     display_columns = [
                         column for column in [
-                            "team_id",
                             "player_name",
                             "placement",
                             "event_name"
