@@ -61,10 +61,12 @@ def get_pokemon_image_backup(pokemon_name):
         f"{pokemon_name}.png"
     )
 
-def is_shiny(shiny_odds=4096):
-    shiny_roll = random.randint(1,shiny_odds)
-    if shiny_roll == 1:
-        return True
+def is_shiny(shiny_rolls=1):
+    rolls = 0
+    while rolls < shiny_rolls:
+        if random.randint(1,4096) == 1:
+            return True
+        rolls = rolls+1
     return False
 
 
@@ -92,7 +94,7 @@ def get_pokemon_image_backup_shiny(pokemon_name):
 
 def show_pokemon_image(pokemon_name, width=100):
     height = width
-    shiny_roll = is_shiny()
+    shiny_roll = is_shiny(4096)
     #I'm so silly goofy XD
     if shiny_roll:
         primary_url = get_pokemon_image_shiny(pokemon_name)
@@ -173,8 +175,8 @@ def show_pokemon_image(pokemon_name, width=100):
             unsafe_allow_html=True,
         )
 
-
-        st.audio("audio/pla_shiny.mp3", autoplay=True, alt=f"Shiny {pokemon_name}")
+        #Each element needs somthing unique so I figured the rand int would do it in the rare case a user loads a page with two shinys of the same pokemon species
+        st.audio("audio/pla_shiny.mp3", autoplay=True, alt=f"Shiny {pokemon_name}_{random.randint(1,10000000000)}")
 
 @st.cache_data
 def get_item_image(item_name):
