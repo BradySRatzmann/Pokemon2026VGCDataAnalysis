@@ -286,7 +286,7 @@ def get_placement_rank(placement):
 
 st.set_page_config(
     page_title="Pokémon VGC Analyzer",
-    page_icon="⚔️",
+    page_icon="https://play.pokemonshowdown.com/sprites/itemicons/poke-ball.png",
     layout="wide"
 )
 
