@@ -1,4 +1,4 @@
-import streamlit.components.v1 as components
+from urllib.parse import quote
 import json
 import streamlit as st
 import pandas as pd
@@ -6,8 +6,8 @@ import os
 import pickle
 import shutil
 import re
-import html
 import requests
+import random
 
 from main import (
     run_analysis,
@@ -61,13 +61,59 @@ def get_pokemon_image_backup(pokemon_name):
         f"{pokemon_name}.png"
     )
 
+def is_shiny(shiny_odds=4096):
+    shiny_roll = random.randint(1,shiny_odds)
+    if shiny_roll == 1:
+        return True
+    return False
+
+
+@st.cache_data
+def get_pokemon_image_shiny(pokemon_name):
+    # Convert Pokémon name into the URL format
+    pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
+    pokemon_name = pokemon_name.replace("’", "'").replace("'", "")
+    pokemon_name = fix_pokemon_names(pokemon_name)
+    return (
+        f"https://play.pokemonshowdown.com/sprites/ani-shiny/"
+        f"{pokemon_name}.gif"
+    )
+@st.cache_data
+def get_pokemon_image_backup_shiny(pokemon_name):
+    # Convert Pokémon name into the URL format
+    pokemon_name = str(pokemon_name).strip().lower().replace(" ", "-")
+    pokemon_name = pokemon_name.replace("’", "'").replace("'", "")
+    pokemon_name = fix_pokemon_names(pokemon_name)
+
+    return (
+        f'https://play.pokemonshowdown.com/sprites/gen5-shiny/'
+        f"{pokemon_name}.png"
+    )
+
 def show_pokemon_image(pokemon_name, width=100):
     height = width
+    shiny_roll = is_shiny()
+    #I'm so silly goofy XD
+    if shiny_roll:
+        primary_url = get_pokemon_image_shiny(pokemon_name)
+    else:
+        primary_url = get_pokemon_image(pokemon_name)
 
-    primary_url = get_pokemon_image(pokemon_name)
-    backup_url = get_pokemon_image_backup(pokemon_name)
+    if shiny_roll:
+        backup_url = get_pokemon_image_backup(pokemon_name)
+    else:
+        backup_url = get_pokemon_image_backup(pokemon_name)
 
     html = f"""
+    <style>
+    html, body {{
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        }}
+    </style>
     <div style="
         width: {width}px;
         height: {height}px;
@@ -110,13 +156,25 @@ def show_pokemon_image(pokemon_name, width=100):
     </script>
     """
 
-    components.html(
-        html,
+    st.iframe(
+        src="data:text/html;charset=utf-8," + quote(html),
         width=width,
-        height=height,
-        scrolling=False
+        height=height
     )
+    if shiny_roll:
+        st.markdown(
+            """
+            <style>
+                .stAudio {
+                    display: none;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
+
+        st.audio("audio/pla_shiny.mp3", autoplay=True, alt=f"Shiny {pokemon_name}")
 
 @st.cache_data
 def get_item_image(item_name):
@@ -187,11 +245,10 @@ def show_item_image(item_name, width=40):
     </script>
     """
 
-    components.html(
-        html,
+    st.iframe(
+        src="data:text/html;charset=utf-8," + quote(html),
         width=width,
-        height=width,
-        scrolling=False
+        height=width
     )
 
 def get_placement_rank(placement):
@@ -281,7 +338,7 @@ else:
 if st.sidebar.button(
     "Run Analysis",
     type="primary",
-    use_container_width=True
+    width="stretch"
 ):
 
     data_points = None
@@ -642,7 +699,7 @@ else:
 
                             st.dataframe(
                                 item_display,
-                                use_container_width=True,
+                                width="stretch",
                                 hide_index=True,
                                 column_config={
                                     "Image": st.column_config.ImageColumn(
@@ -655,7 +712,7 @@ else:
                         else:
                             st.dataframe(
                                 counts.rename("Uses").to_frame(),
-                                use_container_width=True
+                                width="stretch"
                             )
 
             st.subheader("Most Common Moves")
@@ -683,7 +740,7 @@ else:
                     st.bar_chart(move_counts)
                     st.dataframe(
                         move_counts.rename("Uses").to_frame(),
-                        use_container_width=True
+                        width="stretch"
                     )
             else:
                 st.caption("Move information is not present in this dataset.")
@@ -719,7 +776,7 @@ else:
 
                     st.dataframe(
                         matching_teams[display_columns],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True
                     )
             else:
@@ -742,7 +799,7 @@ else:
                 partners_df = analyze_pokemon_partners(
                     pair_df,
                     selected_pokemon,
-                    top_n=10
+                    top_n=10,
                 )
 
                 if partners_df.empty:
@@ -781,7 +838,8 @@ else:
                     # Display partner table
                     st.dataframe(
                         partners_df,
-                        use_container_width=True
+                        width="stretch",
+                        hide_index=True
                     )
 
 
@@ -903,7 +961,7 @@ else:
 
                     st.dataframe(
                         usage_df,
-                        use_container_width=True
+                        width="stretch"
                     )
 
                 # ----------------------------------
@@ -926,7 +984,7 @@ else:
                     st.bar_chart(placement_counts)
                     st.dataframe(
                         placement_counts.rename("Events").to_frame(),
-                        use_container_width=True
+                        width="stretch"
                     )
 
                 # ----------------------------------
@@ -1085,7 +1143,7 @@ else:
 
                     st.dataframe(
                         usage_df,
-                        use_container_width=True
+                        width="stretch"
                     )
 
 
@@ -1166,7 +1224,7 @@ else:
                         "player_name": "Player",
                         "placement": "Placement"
                     }),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
 
@@ -1304,7 +1362,7 @@ else:
                         st.dataframe(
                             prediction_df,
                             hide_index=True,
-                            use_container_width=True
+                            width="stretch"
                         )
 
 
@@ -1466,7 +1524,7 @@ else:
 
             st.dataframe(
                 filtered_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
 
@@ -1603,7 +1661,7 @@ else:
                     "core_pokemon": "Core Pokémon",
                     "top_mons": "Most Common Pokémon"
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
 #streamlit run app.py
