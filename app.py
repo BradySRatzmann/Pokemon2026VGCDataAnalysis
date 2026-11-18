@@ -94,7 +94,7 @@ def get_pokemon_image_backup_shiny(pokemon_name):
 
 def show_pokemon_image(pokemon_name, width=100):
     height = width
-    shiny_roll = is_shiny(4096)
+    shiny_roll = is_shiny()
     #I'm so silly goofy XD
     if shiny_roll:
         primary_url = get_pokemon_image_shiny(pokemon_name)
