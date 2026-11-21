@@ -11,7 +11,9 @@ import random
 
 from main import (
     run_analysis,
-    analyze_pokemon_partners
+    analyze_pokemon_partners,
+    compute_usage_rates,
+    recommend_sixth_mon
 )
 
 
@@ -517,50 +519,53 @@ else:
 
         st.header("Usage Statistics")
 
+        # Recalculate usage from records in the selected format so
+        # both counts and percentages reflect only that regulation.
+        usage_pokemon_df = pokemon_df.copy()
+
+        if "format" in usage_pokemon_df.columns:
+            usage_pokemon_df = pokemon_df.copy()
+
+            filtered_usage_results = compute_usage_rates(usage_pokemon_df)
+        else:
+            st.info(
+                "Format information is not in the saved dataset yet. "
+                "Run a fresh analysis to enable format filtering."
+            )
+
+        filtered_usage_results = compute_usage_rates(usage_pokemon_df)
+
         usage_mapping = {
-
             "Pokémon": "pokemon_usage",
-
             "Items": "item_usage",
-
             "Natures": "nature_usage",
-
             "Moves": "move_usage"
-
         }
 
         analysis_type = st.selectbox(
-
             "Select a category:",
-
             list(usage_mapping.keys())
-
         )
 
-        selected_data = results["usage_results"][
-
+        selected_data = filtered_usage_results[
             usage_mapping[analysis_type]
-
         ]
 
         # Moves use total_uses instead of usage_rate
-
         value_column = (
-
             "total_uses" if analysis_type == "Moves"
-
             else "usage_rate"
-
         )
 
         st.subheader(f"{analysis_type} Usage")
 
-        st.bar_chart(selected_data[value_column])
+        if selected_data.empty:
+            st.info("No usage data is available for this format.")
+        else:
+            st.bar_chart(selected_data[value_column])
+            st.dataframe(selected_data)
 
-        st.dataframe(selected_data)
 
-
-    # ----------------------------------------------
     # Pokémon Explorer
     # ----------------------------------------------
 
@@ -1063,8 +1068,10 @@ else:
         else:
 
             event_options = sorted(
-                event for event in team_df["event_name"].dropna().unique()
-                if event != "Unknown"
+                team_df.loc[
+                    team_df["event_name"] != "Unknown",
+                    "event_name"
+                ].dropna().unique()
             )
 
             if not event_options:
@@ -1080,7 +1087,7 @@ else:
 
                 event_teams = team_df[
                     team_df["event_name"] == selected_event
-                ].copy()
+                    ].copy()
 
                 event_team_ids = event_teams["team_id"].tolist()
 
@@ -1287,64 +1294,101 @@ else:
             if len(selected_pokemon) < 2:
                 st.info("Select at least two Pokémon to generate predictions.")
 
+
+
             else:
-                # Find teams containing ALL selected Pokémon
-                matching_teams = []
 
-                for _, team in team_df.iterrows():
-                    team_members = set(
-                        str(team[col])
-                        for col in pokemon_columns
-                        if pd.notna(team[col])
-                    )
+                # Retrieve the trained model from the analysis results
 
-                    if set(selected_pokemon).issubset(team_members):
-                        matching_teams.append(team_members)
+                clf = results.get("sixth_mon_model")
 
-                st.subheader("Prediction Results")
+                mlb = results.get("sixth_mon_mlb")
 
-                if not matching_teams:
+                metrics = results.get("sixth_mon_metrics", {})
+
+                if clf is None or mlb is None:
+
                     st.warning(
-                        "No teams were found containing all selected Pokémon."
+
+                        "The prediction model is not available. "
+
+                        "Please run a fresh analysis to train the model."
+
                     )
+
 
                 else:
-                    # Count how often each other Pokémon appears
-                    partner_counts = {}
 
-                    for team in matching_teams:
-                        for pokemon in team:
-                            if pokemon not in selected_pokemon:
-                                partner_counts[pokemon] = (
-                                        partner_counts.get(pokemon, 0) + 1
-                                )
+                    st.subheader("Prediction Results")
 
-                    # Convert results into a dataframe
-                    prediction_df = pd.DataFrame(
-                        [
-                            {
-                                "Pokémon": pokemon,
-                                "Teams Used": count,
-                                "Usage Rate": count / len(matching_teams) * 100
-                            }
-                            for pokemon, count in partner_counts.items()
-                        ]
+                    # Generate predictions using the trained model
+
+                    recommendations = recommend_sixth_mon(
+
+                        clf,
+
+                        mlb,
+
+                        selected_pokemon,
+
+                        top_n=top_n
+
                     )
 
-                    if prediction_df.empty:
-                        st.info("No additional Pokémon were found.")
-                    else:
-                        prediction_df = prediction_df.sort_values(
-                            "Teams Used",
-                            ascending=False
-                        ).head(top_n)
+                    if not recommendations:
 
-                        st.write(
-                            f"Found **{len(matching_teams)} teams** "
-                            f"containing all selected Pokémon."
+                        st.info("No recommendations could be generated.")
+
+
+                    else:
+
+                        st.caption(
+
+                            "Predictions generated using your trained "
+
+                            "Logistic Regression model."
+
+                        )
+
+                        # Display model evaluation metrics
+
+                        if metrics:
+                            st.write(
+
+                                f"Model Top-1 Accuracy: "
+
+                                f"{metrics['top1']:.1%}"
+
+                            )
+
+                            st.write(
+
+                                f"Model Top-3 Accuracy: "
+
+                                f"{metrics['top3']:.1%}"
+
+                            )
+
+                        prediction_df = pd.DataFrame(
+
+                            [
+
+                                {
+
+                                    "Pokémon": pokemon,
+
+                                    "Predicted Probability": probability * 100
+
+                                }
+
+                                for pokemon, probability in recommendations
+
+                            ]
+
                         )
 
                         # Display recommendations
+
                         for _, row in prediction_df.iterrows():
                             col1, col2 = st.columns([1, 4])
 
@@ -1353,19 +1397,29 @@ else:
 
                             with col2:
                                 st.markdown(f"**{row['Pokémon']}**")
+
                                 st.write(
-                                    f"Appeared on {int(row['Teams Used'])} "
-                                    f"matching teams "
-                                    f"({row['Usage Rate']:.1f}%)"
+
+                                    f"Predicted Probability: "
+
+                                    f"{row['Predicted Probability']:.2f}%"
+
                                 )
 
                         # Show the complete results in a table
+
                         st.subheader("Prediction Data")
+
                         st.dataframe(
+
                             prediction_df,
+
                             hide_index=True,
+
                             width="stretch"
+
                         )
+
 
 
     # ----------------------------------------------
@@ -1378,7 +1432,7 @@ else:
 
         st.write(
             "Browse the complete team dataset and filter teams "
-            "by player, placement, event, or Pokémon."
+            "by format, player, placement, event, or Pokémon."
         )
 
         # Pokémon columns
@@ -1421,6 +1475,19 @@ else:
             col1, col2 = st.columns(2)
 
             with col1:
+                if "format" in team_df.columns:
+                    selected_formats = st.multiselect(
+                        "Format",
+                        sorted(team_df["format"].dropna().unique()),
+                        placeholder="Select formats..."
+                    )
+                else:
+                    selected_formats = []
+                    st.info(
+                        "Format information is not in the saved dataset yet. "
+                        "Run a fresh analysis to enable format filtering."
+                    )
+
                 selected_players = st.multiselect(
                     "Player",
                     sorted(team_df["player_name"].dropna().unique()),
@@ -1465,11 +1532,20 @@ else:
             # Apply Filters
             # ------------------------------------------
 
-            # Keep only one team per player per event
+            # Keep one team per player, event, and format.
+            dedupe_columns = ["player_name", "event_name"]
+            if "format" in team_df.columns:
+                dedupe_columns.append("format")
+
             filtered_df = team_df.drop_duplicates(
-                subset=["player_name", "event_name"],
+                subset=dedupe_columns,
                 keep="first"
             ).copy()
+
+            if selected_formats and "format" in filtered_df.columns:
+                filtered_df = filtered_df[
+                    filtered_df["format"].isin(selected_formats)
+                ]
 
             if selected_players:
                 filtered_df = filtered_df[
